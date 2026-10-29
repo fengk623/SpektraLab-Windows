@@ -5,7 +5,7 @@ status: Review
 owner: Sizhi
 created: 2026-10-28
 updated: 2026-10-28
-baseline: 1e727cd6cbd25e0292013e3b4dbb6ac237c0231f
+baseline: 4297621a7b150595de9dcb1beafbe7645b0f8076
 prd: "none: 开发流程与 CI 是工程基础设施，没有用户可见的功能"
 tests:
   - tools/process/tests/test_check_process.py
@@ -19,15 +19,15 @@ tests:
 
 ## 2. 现状与动机（Context）
 
-基线：`Windows_Linux` @ `1e727cd6cbd25e0292013e3b4dbb6ac237c0231f`（2026-10-29 08:39 +0800）。
+基线：evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22 +0800），即上游 `1e727cd`（合并 PR #23）再加该 fork 的 5 个提交。下面的历史回放截至 `1e727cd`；那 5 个提交另作回放（§6.3）。
 
 - **上游有流程，但文档不入库。** 上游先写 PRD、RFC 再编码，代码注释大量引用 `RFC-014`、`RFC-018` 等；但 `.gitignore:329-330` 把 `/rfc/`、`/PRD/` 设为本机保存（2026-10-13 起），协作者看不到。Windows 侧的设计记录散落在 `engine/WINDOWS_*.md`、`desktop/NOTES.md` 等处，格式各异，没有索引和状态。
 - **“接口变更同一提交改规范”只靠自觉。** 规则见 `AGENTS.md:62-68`、`ARCHITECTURE.md:662-665`、`desktop/HOST-PROTOCOL.md:15-17`。按本 RFC 的规则回放 `Windows_Linux` 上提交时间在 2026-09-11 00:00（+0800）之后、截至 `1e727cd` 的 343 个非合并提交（§6.3）：
   - `kFields` 字段变化 20 次，其中 9 次没有在同一提交改 `API-SPEC-callable-render-service.md`；`glare_amount`、`grain_amount`、`strip_budget_bytes`、`extended_dynamic_range`、`digital_intermediate` 这些字段名在当前的 API-SPEC 里一次也没有出现；`auto_exposure_method` 只记在 `CONTRACT-frontend-backend.md` §6。
   - C ABI 不在此列：上游没有“C ABI 变化须改 API-SPEC”的规则，`spk_engine.h` 的注释就是它的文档（`spk_engine.h` 声明的 29 个 `spk_*` 函数，API-SPEC 只点名 12 个）。本 RFC 因此不为它设同步规则（§7）。
   - 宿主协议变化 9 次，4 次未同步。宿主方法集的 5 次变化都同步了；4 次未同步都是 `protocol.ts` 的改动，其中 3 次是前端类型追上协议文档里已有的字段，1 次是真遗漏：`no_film` 与 `hello.frame_options`（宿主侧 `445e314`、前端侧 `f40ff32`）写进了 API-SPEC §19，却没有写进 `desktop/HOST-PROTOCOL.md`。
-- **CI 的 Windows 覆盖有空洞。** `desktop.yml` 的前端检查（tsc、eslint、vitest、`cargo test`）只在 Ubuntu 上跑；Windows 只用于打包和静默安装。`engine/tests/test_*.py` 里只有 `test_*codec*.py` 两个文件进了 CI（`desktop.yml:108-109`），另外 4 个文件的单元测试（`test_windows_fixture.py` 等，Windows 工具本身）从未在 CI 上运行。推送到新分支不会触发 `desktop.yml`（它只监听 `main`、`Windows_Linux`、`claude/**`）。
-- **用户要求（2026-10-28）**：规范开发流程，新功能写 PRD，模块写 RFC，加自动化测试，配置 CI；完成本地验证后推送到 `windows_linux2`，经批准再合并进 `Windows_Linux`。
+- **CI 的 Windows 覆盖有空洞。** `desktop.yml` 的前端检查（tsc、eslint、vitest、`cargo test`）只在 Ubuntu 上跑；Windows 只用于打包和静默安装。`engine/tests/test_*.py` 里只有 `test_*codec*.py` 两个文件进了 CI（`desktop.yml:108-109`），另外 4 个文件的单元测试（`test_windows_fixture.py` 等，Windows 工具本身）从未在 CI 上运行。在 `1e727cd` 上，推送到新分支不会触发 `desktop.yml`（它只监听 `main`、`Windows_Linux`、`claude/**`）；在 `4297621` 上，`aed5fd9` 把 `desktop.yml` 与 `build.yml` 都改成了只手动触发。
+- **用户要求（2026-10-28）**：规范开发流程，新功能写 PRD，模块写 RFC，加自动化测试，配置 CI；完成本地验证后推送到用户自己的 fork（`fengk623/SpektraLab-Windows`）的 `windows2`，经用户审核后由用户本人提 PR；不改动 `JamesQiu2005/SpektraLab` 的 `main`、`Windows_Linux` 与 `evanfan005-bit` 的分支。
 
 ## 3. 设计（Design）
 
@@ -64,7 +64,7 @@ tests:
   - `process-gate`（ubuntu-24.04）：检查器单元测试（`SPK_REQUIRE_GIT=1`）→ `docs audit` → `sync`。sync 的基准：PR 用 PR 的基准提交；推送到 `Windows_Linux` 用推送前的提交；其他分支用 `origin/Windows_Linux` 的合并基准。
   - `python-unit`（ubuntu-24.04、windows-latest）：`engine/tests/test_*.py` 全部与检查器测试；numpy 固定版本。
 - 修改 `.github/workflows/desktop.yml`：
-  - 推送触发增加集成暂存分支 `windows_linux2`，让它有完整 CI。
+  - 推送到开发分支 `windows2` 与 PR 自动触发完整的桌面 CI；其他分支仍只手动触发（沿用 `aed5fd9`）。
   - 新增 `desktop-checks-windows`（windows-latest）：`npm run check`、`build:web`、`cargo test --locked`。不加 Playwright（它跑浏览器里的 mock host，平台无关，Linux 上已覆盖）。不作为打包任务的前置条件，红了也不阻塞打包，但会在 PR 上显示。
 - 新增 `.github/pull_request_template.md`：关联的 PRD/RFC、门禁记录、先红后绿、规范同步、真实窗口检查、测量。
 
@@ -109,7 +109,7 @@ tests:
 ### 6.4 门禁
 
 - 窄门禁：`python -m unittest discover -s tools/process/tests`；`python tools/process/check_process.py all --base origin/Windows_Linux --worktree`。
-- 集成门禁：`windows_linux2` 上 `process.yml` 与 `desktop.yml` 全部任务。
+- 集成门禁：`windows2` 上 `process.yml` 与 `desktop.yml` 全部任务。
 
 ## 7. 备选方案（Alternatives）
 
@@ -122,7 +122,7 @@ tests:
 
 ## 8. 发布与迁移（Rollout）
 
-1. 在 `windows_linux2` 落地，CI 全绿，负责人批准后合并进 `Windows_Linux`。
+1. 在 `fengk623/SpektraLab-Windows` 的 `windows2` 落地，CI 全绿，用户审核批准后由用户本人提 PR。
 2. 已有文档不迁移，作为等价文档登记在索引里。
 3. sync 规则只检查合并基准之后的改动；§2 列出的已有偏差不会让 CI 变红，记录在 `reference-audit.md` 的“发现的偏差”一节，由负责的人逐项补规范。
 4. 回滚：删除 `process.yml`，并把 `desktop.yml` 的触发分支与新任务恢复原状；文档可以保留。
@@ -133,6 +133,8 @@ tests:
 - 2026-10-28 · `Gate:` 缺失先警告，不阻塞 · 回放历史后发现大多数提交没有这一行（§7）。
 - 2026-10-28 · 集成流程：推送到 `windows_linux2`，经用户批准再合并进 `Windows_Linux` · 用户指示（2026-10-28 21:30 CDT）。
 - 2026-10-28 · 集成暂存分支定名 `windows_linux2`（从 `Windows_Linux` 分出） · 用户指示（2026-10-28 22:08 CDT）。
+- 2026-10-28 · 改为在用户自己的 fork 开发：从 `evanfan005-bit/SpektraLab-Windows` fork 到 `fengk623/SpektraLab-Windows`，开发分支 `windows2`，基线改为该 fork 的 `Windows_Linux` @ `4297621`；不再向 `JamesQiu2005/SpektraLab` 推送（此前建的 `windows_linux2` 留在原处：仓库规则禁止删分支，用户也禁止删除） · 用户指示（2026-10-28 22:35 CDT）。
+- 2026-10-28 · `desktop.yml` 在 `windows2` 的推送与 PR 上自动运行，其他分支沿用 `aed5fd9` 的只手动 · 用户要求配置 CI；该 fork 改为手动是为了日常推送不跑 CI，`windows2` 是要拿 CI 结果做批准依据的那条分支。
 - 2026-10-28 · 撤下第一版的 `c-abi` 规则；补齐 DOC000、AUD000、AUD002、SYN003 的测试；回放窗口改为明确的起始时刻（343 个提交） · 独立核查发现：上游没有 C ABI 同步规则，四个结果代码屏蔽后测试仍全绿，`--since` 带当前时刻导致计数随运行时间变化。
 - 2026-10-28 · `desktop-checks-windows` 不阻塞打包任务 · 让 Windows 上的平台问题可见，又不因新增检查把已有的打包证据一起挡住。
 

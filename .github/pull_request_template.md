@@ -1,5 +1,5 @@
 <!--
-Windows / Linux 的改动以 Windows_Linux（或集成暂存分支 windows_linux2）为目标，不要以 main 为目标。
+Windows / Linux 的改动以 Windows_Linux 一线（本 fork 的开发分支 windows2）为目标，不要以 main 为目标。PR 由用户本人审核后提交。
 流程：docs/process/DEVELOPMENT-PROCESS.md。不适用的项写“不涉及：<理由>”，不要删掉。
 -->
 

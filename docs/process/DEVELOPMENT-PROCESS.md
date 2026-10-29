@@ -16,8 +16,8 @@
      （小步提交，每个提交写明跑了哪个门禁；新回归测试先红后绿）
   ──► 窄门禁（开发中，只跑受影响的测试）
   ──► 集成门禁（推送前，全量）
-  ──► 推送到集成暂存分支 windows_linux2 ──► CI 全绿
-  ──► 负责人批准 ──► 合并进 Windows_Linux
+  ──► 推送到开发分支 windows2（fengk623/SpektraLab-Windows）──► CI 全绿
+  ──► 用户批准 ──► 用户本人提 PR 合并
 ```
 
 三件事不可省：**先写文档再写代码**、**接口变更同一范围内更新规范**、**每个声明有测试或测量支撑**。
@@ -130,16 +130,18 @@
 | `desktop.yml` / `desktop-checks-windows` | windows-latest | `npm run check`、`build:web`、`cargo test --locked`：Windows 路径、换行、文件 ID 等平台代码在 Windows 上跑 |
 | `desktop.yml` / `package-linux` | ubuntu-24.04 | `.deb` + AppImage |
 | `desktop.yml` / `package-windows` | windows-latest | 真实 Windows 上宿主回应 `hello`；NSIS 安装包；静默安装后再问已安装的宿主 |
-| `build.yml` / `build` | macos-26 | macOS 应用能否从干净检出编译（只在推送到 `main`、PR 和手动触发时运行） |
+| `build.yml` / `build` | macos-26 | macOS 应用能否从干净检出编译（只在手动触发时运行：本 fork 的来源 evanfan005-bit/SpektraLab-Windows 在 `aed5fd9` 把它改为手动，这里沿用） |
 
-**触发**：`process.yml` 对所有分支的推送和所有 PR 运行；`desktop.yml` 对 `main`、`Windows_Linux`、`windows_linux2`、`claude/**` 的推送、所有 PR 和手动触发运行。
+**触发**：`process.yml` 对所有分支的推送和所有 PR 运行；`desktop.yml` 对 `windows2` 的推送、所有 PR 和手动触发运行（其他分支的推送不触发：`aed5fd9` 把它改成了只手动，本 fork 只为 `windows2` 与 PR 加回自动触发）；`build.yml` 只手动触发。fork 默认不启用 Actions，要在仓库的 Actions 页面启用一次。
 
 **CI 回答不了的问题**（需要人工或专用机器）：真实 GPU 上的渲染（托管的 Windows 机器没有 Vulkan 驱动，`host_hello.py` 接受 `backend.available:false`）、Vulkan 与 Metal 的整图对照（需要 Mac）、相机 RAW（夹具不入库）、真实显示器的 ICC / 广色域 / HDR / 高 DPI、安装包签名（目前未签名）。这些写进 PR 的“人工验证”一栏。
 
 ## 8. 分支、提交与合并
 
-- Windows / Linux 工作只进 `Windows_Linux`，不进 `main`（`README.md:136-146`）。
-- **集成暂存**：开发 → 本地验证 → 推送到 `windows_linux2` → CI → 负责人批准 → 合并进 `Windows_Linux`。未经批准不合并，不对他人可能已读取的分支 rebase 或强推（`CONTRACT-frontend-backend.md:148-174`）。
+- Windows / Linux 工作只进 `Windows_Linux` 一线，不进 `main`（`README.md:136-146`）。
+- **仓库与分支**：上游 `JamesQiu2005/SpektraLab` → 协作者的 fork `evanfan005-bit/SpektraLab-Windows`（现行版本参照，`Windows_Linux` @ `4297621`）→ 用户的 fork `fengk623/SpektraLab-Windows`，开发分支 `windows2`。开发只在本地文件夹与 `windows2` 上进行。
+- **不碰别人的分支**：不修改、不推送 `JamesQiu2005/SpektraLab` 的 `main` 与 `Windows_Linux`，也不修改 `evanfan005-bit` 的任何分支（用户指示，2026-10-28 22:35 CDT）。
+- **合并**：开发 → 本地验证 → 推送到 `windows2` → CI → 用户审核批准 → 用户本人提 PR。未经批准不合并，不对他人可能已读取的分支 rebase 或强推（`CONTRACT-frontend-backend.md:148-174`）。
 - 一个提交做一件事；标题说做了什么，正文说为什么；正文写 `Gate:`（跑了什么、结果、耗时），新测试写 `Red before:`，豁免写 `Spec-Sync-Waiver:`。
 - 不提交：个人照片、日志、导出结果、带本机路径的证据（如 `D:/…`）、`.claude/`、`CLAUDE.md`。
 - 合并 `main` → `Windows_Linux` 时按模块合并，先保留本地工作，按文件内容比较而不是按提交数比较（`engine/WINDOWS_FULL_MIGRATION_PLAN.md:16`）。
