@@ -1108,8 +1108,17 @@ Added 2026-10-28 on `Windows_Linux`; `main` does not carry this section.
   `protocol.ts` → `desktop/HOST-PROTOCOL.md`, a workflow → the process
   document. A change that is deliberately not an interface change
   says so with `Spec-Sync-Waiver: <rule>: <reason>` in its commit message.
-- **Integration:** push to `windows_linux2`, let the full CI run there, and
-  merge into `Windows_Linux` only after approval.
+- **Integration:** work in the local folder and on `windows2` in the user's
+  fork `fengk623/SpektraLab-Windows` (forked from
+  `evanfan005-bit/SpektraLab-Windows`; baseline its `Windows_Linux` @
+  `4297621`). Push to `windows2`; the full CI runs on pushes to `windows2` and
+  on pull requests (`.github/workflows/desktop.yml`, `process.yml`). A merge
+  happens only through a pull request the user reviews and submits personally.
+  Never push to JamesQiu2005's `main` / `Windows_Linux` or to evanfan005-bit's
+  branches. The "Personal fork workflow" section at the top of this file (push
+  straight to `Windows_Linux`, manual CI, no PR) is that fork's rule, not this
+  one's. (Before 2026-10-28 22:35 CDT the integration branch was
+  `windows_linux2` on JamesQiu2005/SpektraLab; that branch was left in place.)
 - **Which upstream rules this branch adopts, adjusts or does not apply, and
   why:** `docs/reference-audit.md`. It also lists drift found while auditing
   that is not fixed yet.
@@ -1128,7 +1137,11 @@ five of those field names (`glare_amount`, `grain_amount`,
 reached it. Of 9 host-protocol changes, 4 left `desktop/HOST-PROTOCOL.md`
 untouched; three were the TypeScript types catching up with fields the
 protocol already documented, and one was real: `no_film` and
-`hello.frame_options` are in API-SPEC §19 and nowhere in the host protocol.
-Nothing failed, because nothing checked. `tools/process/check_process.py sync`
-checks it now, in CI and locally; `tools/process/tests/test_check_process.py`
-holds the rules, and RFC-W001 §6.3 has the replay.
+`hello.frame_options` were in API-SPEC §19 and nowhere in the host protocol,
+until evanfan005-bit's `ec59666` and merge `4297621` added them
+(`desktop/HOST-PROTOCOL.md:177-203` at `4297621`). Nothing failed, because
+nothing checked. `tools/process/check_process.py sync` checks it now, in CI
+and locally; `tools/process/tests/test_check_process.py` holds the rules, and
+RFC-W001 §6.3 has the replay, including the three non-merge commits from
+`1e727cd` to `4297621` (one host-protocol change, `ec59666`, documented in the
+same commit; no `kFields` change).

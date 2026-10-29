@@ -41,7 +41,7 @@
 - **位置与命名**：`docs/prd/PRD-Wnnn-<slug>.md`、`docs/rfc/RFC-Wnnn-<slug>.md`、`docs/adr/ADR-Wnnn-<slug>.md`，从各目录的 `TEMPLATE.md` 复制，并在该目录 `README.md` 索引加一行（状态与文件一致）。
   - 不放在根目录 `rfc/`、`PRD/`：上游 `.gitignore:329-330` 把它们设为仅本机保存，放进去的文件不会入库。
   - 编号带 `W`：上游代码注释里的 `RFC-014`、`RFC-018` 等指向上游本机的 RFC-001…RFC-036，编号不能复用。
-- **架构文档是当前事实**：行为改了，就在同一范围内改 `ARCHITECTURE.md`、`engine/WINDOWS*.md`、`desktop/*.md` 的对应段落。文档里的数字写出处（测量记录或测试名），不写“更快”“更稳”之类的形容词。描述已删除事物的文档是缺陷（`AGENTS.md:33-43`）。
+- **架构文档是当前事实**：行为改了，就在同一范围内改 `ARCHITECTURE.md`、`engine/WINDOWS*.md`、`desktop/*.md` 的对应段落。文档里的数字写出处（测量记录或测试名），不写“更快”“更稳”之类的形容词。描述已删除事物的文档是缺陷（`AGENTS.md:52-62`）。
 - **遗留文档**：`engine/WINDOWS_*.md`、`engine/PORT_*.md`、`desktop/HOST-PROTOCOL.md`、`desktop/PARITY.md`、`desktop/NOTES.md` 等已有文档不迁移，在 PRD/RFC 索引里登记为等价文档，就地更新。
 - **检查器**：`python tools/process/check_process.py docs` 检查命名、front matter、状态、必需章节、索引、交叉引用、相对链接。
 
@@ -49,7 +49,7 @@
 
 ### 3.1 窄门禁（开发中）
 
-只跑能抓到这次改动的最小集合；提交信息用 `Gate:` 一行写明跑了什么、结果、耗时（`AGENTS.md:211-226`）。
+只跑能抓到这次改动的最小集合；提交信息用 `Gate:` 一行写明跑了什么、结果、耗时（`AGENTS.md:230-245`）。
 
 | 改动范围 | 窄门禁 |
 |---|---|
@@ -68,24 +68,24 @@
 3. `cd desktop; npm run check; npm run build:web; npx playwright test`；`cd src-tauri; cargo test --locked`
 4. 引擎与宿主：`engine/build-linux.sh --test`，或 Windows 上 `engine/build-windows.ps1`
 5. 界面改动：真实窗口检查（§5）
-6. **读耗时，不只读失败数**：跳过的套件和完整的套件都报告 0 失败（`AGENTS.md:798-822`，trap 26）。
+6. **读耗时，不只读失败数**：跳过的套件和完整的套件都报告 0 失败（`AGENTS.md:817-841`，trap 26）。
 
 ### 3.3 先红后绿
 
 - 新回归测试先在旧代码（或故意破坏的代码）上失败，再在修复后通过；提交信息写 `Red before: <怎么看到它失败的>`。
-- 守卫必须能触发：检查要有能让它变红的负向对照（`AGENTS.md:565-585`，trap 16）。检查器本身的做法见 RFC-W001 §6（逐个屏蔽检查项，确认有测试变红）。
+- 守卫必须能触发：检查要有能让它变红的负向对照（`AGENTS.md:584-604`，trap 16）。检查器本身的做法见 RFC-W001 §6（逐个屏蔽检查项，确认有测试变红）。
 - 已知缺陷用“严格的预期失败”固定（vitest 的 `test.fails`，对应上游的 `XCTExpectFailure(strict: true)`），修复它的提交里才能去掉标记。
 
 ### 3.4 测试隔离
 
-- 共享设置注入，不读真实存储：`createSettingsStore(storage)`（`desktop/src/state/settings.ts`）；Rust 用临时目录；Python 用 `tempfile`；需要 `APPDATA` 的进程把它指向临时目录（`desktop/agent/smoke.py` 是范例）（`AGENTS.md:696-752`，trap 24）。
+- 共享设置注入，不读真实存储：`createSettingsStore(storage)`（`desktop/src/state/settings.ts`）；Rust 用临时目录；Python 用 `tempfile`；需要 `APPDATA` 的进程把它指向临时目录（`desktop/agent/smoke.py` 是范例）（`AGENTS.md:715-771`，trap 24）。
 - 夹具先复制到临时目录再打开；相机 RAW 不入库；输出路径必须是新的，工具拒绝覆盖。
 - 测试和工具不写真实的 `%APPDATA%\app.spektralab.desktop`、照片文件夹或用户的导出目录。
 
 ### 3.5 预览、画布、缩略图、导出一致
 
-- 显示画面的每个表面都显示画布那一帧：新表面在 `desktop/src/shared/surfaces.test.ts` 加用例（裁切 + 90° 旋转后与画布比较；`AGENTS.md:964-984`，trap 33）。
-- 导出保存已经显示的那一帧，不重新抽取颗粒（`engine/WINDOWS_DESKTOP.md`、`engine/WINDOWS_WIDE_GAMUT.md:25-26`）。
+- 显示画面的每个表面都显示画布那一帧：新表面在 `desktop/src/shared/surfaces.test.ts` 加用例（裁切 + 90° 旋转后与画布比较；`AGENTS.md:983-1003`，trap 33）。
+- 导出保存已经显示的那一帧，不重新抽取颗粒（`engine/WINDOWS_DESKTOP.md`、`engine/WINDOWS_WIDE_GAMUT.md:24-25`）。
 - 批量导出期间，任何改变当前帧的操作都检查 `batchExporting`（trap 34）。
 
 ## 4. 接口变更与规范同步
@@ -94,7 +94,7 @@
 
 | 规则 | 什么时候触发 | 同一范围内必须改 | 依据 |
 |---|---|---|---|
-| `sync:wire-schema` | `engine/src/core/params.cpp` 的 `kFields` 表中有字段新增、删除或定义变化（名称、路径、类型、层、live、范围） | `API-SPEC-callable-render-service.md` | `AGENTS.md:62-68`；`ARCHITECTURE.md:662-665` |
+| `sync:wire-schema` | `engine/src/core/params.cpp` 的 `kFields` 表中有字段新增、删除或定义变化（名称、路径、类型、层、live、范围） | `API-SPEC-callable-render-service.md` | `AGENTS.md:81-87`；`ARCHITECTURE.md:662-665` |
 | `sync:wire-schema-parity` | `kFields` 字段名集合变化 | `engine/tests/parity_schema.py` | `ARCHITECTURE.md:662-665` |
 | `sync:host-protocol` | `engine/host/main.cpp` 的方法集合变化，或 `desktop/src/shared/protocol.ts` 改动 | `desktop/HOST-PROTOCOL.md` | `desktop/HOST-PROTOCOL.md:15-17` 只对破坏性变更要求同一提交改文件；本项目扩展到增量变更（RFC-W001 §3.3） |
 | `sync:ci-gates-doc` | `.github/workflows/**` 改动 | 本文件（§7 的 CI 表） | 文档是现行事实 |
@@ -106,7 +106,7 @@
 
 ## 5. 真实窗口与界面检查
 
-- Playwright 跑的是浏览器里的页面和 mock host，离屏截图证明不了真实窗口（`AGENTS.md:265-291`）。界面改动要在 Windows 上用真实 Tauri 窗口（`npm run tauri dev`，或安装包）检查一遍，PR 里写：检查了什么、缩放比例（100% / 125% / 150%）、显示器（单屏 / 多屏、sRGB / P3）、截图。
+- Playwright 跑的是浏览器里的页面和 mock host，离屏截图证明不了真实窗口（`AGENTS.md:284-310`）。界面改动要在 Windows 上用真实 Tauri 窗口（`npm run tauri dev`，或安装包）检查一遍，PR 里写：检查了什么、缩放比例（100% / 125% / 150%）、显示器（单屏 / 多屏、sRGB / P3）、截图。
 - Windows 平台习惯优先于模仿 macOS：系统标题栏（Snap Layouts、DPI、无障碍）、`&` 菜单助记符、Ctrl 快捷键、Ctrl+Y 重做、F11 全屏、系统文件对话框、每显示器 DPI。偏离写进 PRD 的“Windows 平台习惯”一节。
 - 根目录 `screenshots/` 是所有者的 macOS 截图，不替换；Windows 截图放 PR 里，不入库个人照片。
 
@@ -138,9 +138,10 @@
 
 ## 8. 分支、提交与合并
 
-- Windows / Linux 工作只进 `Windows_Linux` 一线，不进 `main`（`README.md:136-146`）。
+- Windows / Linux 工作只进 `Windows_Linux` 一线，不进 `main`（`README.md:153-163`）。
 - **仓库与分支**：上游 `JamesQiu2005/SpektraLab` → 协作者的 fork `evanfan005-bit/SpektraLab-Windows`（现行版本参照，`Windows_Linux` @ `4297621`）→ 用户的 fork `fengk623/SpektraLab-Windows`，开发分支 `windows2`。开发只在本地文件夹与 `windows2` 上进行。
 - **不碰别人的分支**：不修改、不推送 `JamesQiu2005/SpektraLab` 的 `main` 与 `Windows_Linux`，也不修改 `evanfan005-bit` 的任何分支（用户指示，2026-10-28 22:35 CDT）。
+- **基线 fork 的规则不沿用**：`4297621` 的 `AGENTS.md:3-20`（`aed5fd9`）要求直接推送到该 fork 的 `Windows_Linux`、CI 只手动触发、不开 PR；那是 evanfan005-bit 的 fork 的流程，本项目按本节（[reference-audit](../reference-audit.md) G-04）。
 - **合并**：开发 → 本地验证 → 推送到 `windows2` → CI → 用户审核批准 → 用户本人提 PR。未经批准不合并，不对他人可能已读取的分支 rebase 或强推（`CONTRACT-frontend-backend.md:148-174`）。
 - 一个提交做一件事；标题说做了什么，正文说为什么；正文写 `Gate:`（跑了什么、结果、耗时），新测试写 `Red before:`，豁免写 `Spec-Sync-Waiver:`。
 - 不提交：个人照片、日志、导出结果、带本机路径的证据（如 `D:/…`）、`.claude/`、`CLAUDE.md`。

@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **用途** | 记录 Windows 版协同开发参照了 SpektraLab 上游的哪些规范、读了哪些文件、每条规范在本项目中怎样采用；不适用的规则写明理由，不静默忽略 |
-| **本项目** | SpektraLab 仓库的 `Windows_Linux` 分支（Windows / Linux 移植）。集成暂存分支 `windows_linux2`，经负责人批准后合并进 `Windows_Linux` |
-| **两种参考角色** | `main`（macOS 产品）是 **UI 参考**与**开发规范参考**；`Windows_Linux` 是本项目的**代码基线** |
+| **本项目** | SpektraLab 上游 `Windows_Linux` 一线的 Windows / Linux 移植。开发分支是用户自己的 fork `fengk623/SpektraLab-Windows`（从 evanfan005-bit/SpektraLab-Windows fork）上的 `windows2`；合并只通过用户审核后本人提交的 PR；从不向 JamesQiu2005/SpektraLab 的 `main`、`Windows_Linux` 或 evanfan005-bit 的分支推送 |
+| **两种参考角色** | `main`（macOS 产品）是 **UI 参考**与**开发规范参考**；evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux`（上游 `Windows_Linux` 加 5 个提交）是本项目的**代码基线** |
 | **维护** | 更新参考基线时：重新读取 §2 所列文件，改 §1 的 SHA 与日期，逐行复核 §5。格式由 `python tools/process/check_process.py audit` 检查（表头、适用性词汇、理由、路径存在、计数） |
 | **流程文档** | [process/DEVELOPMENT-PROCESS.md](process/DEVELOPMENT-PROCESS.md)；设计记录 [RFC-W001](rfc/RFC-W001-development-process-and-ci.md) |
 
@@ -14,38 +14,38 @@
 
 | 字段 | 值 |
 |---|---|
-| 仓库 URL | https://github.com/JamesQiu2005/SpektraLab |
-| UI 与规范参考分支 | `main` @ `fd891c6bc5eb350387602deb5c1ef9b6dcdab948`（2026-10-28 11:10:50 +0800，“feat(film): Don't Apply Film Simulation in the Film section's menu”） |
-| 本项目基线分支 | `Windows_Linux` @ `1e727cd6cbd25e0292013e3b4dbb6ac237c0231f`（2026-10-29 08:39:50 +0800，合并 PR #23） |
-| 分支关系 | `main` 是 `Windows_Linux` 的祖先（合并基准即 `main` 的 HEAD），`Windows_Linux` 领先 40 个提交 |
-| 协作者分支（只读对照，未并入） | evanfan005-bit/SpektraLab-Windows 的 Windows_Linux 分支，commit 4297621a7b150595de9dcb1beafbe7645b0f8076（在本基线之上多两个提交：本地内存与 no-film 修复，72 个文件 +3535/−752） |
+| 仓库 URL | 上游 https://github.com/JamesQiu2005/SpektraLab；基线所在 fork https://github.com/evanfan005-bit/SpektraLab-Windows；开发 fork https://github.com/fengk623/SpektraLab-Windows（开发分支 `windows2`） |
+| UI 与规范参考分支 | `main` @ `fd891c6bc5eb350387602deb5c1ef9b6dcdab948`（2026-10-28 11:10:50 +0800，“feat(film): Don't Apply Film Simulation in the Film section's menu”）；上游的 `main`，本地 `origin/main`（evanfan005-bit/SpektraLab-Windows）也是这个 SHA |
+| 本项目基线分支 | evanfan005-bit/SpektraLab-Windows `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22:11 +0800，“Merge upstream PR #23 with local memory and native no-film fixes”）：上游 `1e727cd` 加 evanfan005-bit 的 5 个提交（`eb6a4b6`、`aed5fd9`、`bbf536d`、`ec59666`、合并 `4297621`；`git log --oneline 1e727cd..4297621`）；`git diff --stat 1e727cd 4297621`：72 个文件 +3535/−752，没有删除文件 |
+| 基线的父提交（上游） | JamesQiu2005/SpektraLab `Windows_Linux` @ `1e727cd6cbd25e0292013e3b4dbb6ac237c0231f`（2026-10-29 08:39:50 +0800，合并 PR #23）：`4297621` 的第二父提交（第一父提交是 `ec59666`）；本审计初版以它为基线 |
+| 分支关系 | `main` 是 `4297621` 的祖先（`git merge-base --is-ancestor origin/main 4297621` 成立，合并基准即 `fd891c6`）；`4297621` 领先 `main` 45 个提交、落后 0 个（`git rev-list --count origin/main..4297621`、`4297621..origin/main`），其中 40 个也在 `1e727cd` 里（`git rev-list --count origin/main..1e727cd`） |
 | 检查日期 | 2026-10-28（America/Chicago；UTC 2026-10-29） |
-| 本地工作副本 | 上述 `Windows_Linux` SHA 的源码快照（无 `.git`），按文件大小逐一比对确认，不是协作者分支 |
+| 本地工作副本 | 用户本机的 `C:\Users\Sizhi\Desktop\SpektraLab-Windows_Linux` 是 `1e727cd` 的源码快照（初版审计时按文件大小逐一比对确认），正在更新为 `4297621` 加 `windows2` 的文档 |
 
 ## 2. 实际读取的文件
 
-“全文”指逐行读完；“摘读”指读了文件头、目录和与审计有关的段落。行号都以 §1 的 SHA 为准。
+“全文”指逐行读完；“摘读”指读了文件头、目录和与审计有关的段落。初版按 `1e727cd` 读取；重定基线时读了 `1e727cd..4297621` 对文档与工作流的改动（见本表最后一行），并逐条复核了本文的行号引用。行号：本项目文件以 `4297621` 为准（HEAD 的 `AGENTS.md` 只在末尾追加一节，原有行号与 `4297621` 相同；HEAD 的工作流以 HEAD 为准并注明）；标明 main 的以 `fd891c6` 为准。
 
 | 类别 | 文件 | 分支 | 深度 |
 |---|---|---|---|
-| README | `README.md`、`README.zh-CN.md` | main、Windows_Linux（两分支相同） | 全文 |
-| 开发约定与踩坑 | `AGENTS.md`（1072 行，trap 1–35） | 两分支相同 | 全文 |
+| README | `README.md`、`README.zh-CN.md` | main、Windows_Linux（`1e727cd` 与 main 相同；`4297621` 多了 `aed5fd9` 加在开头的个人 fork 说明，`README.md:5-20`、`README.zh-CN.md:5-16`，其后行号分别 +17、+13） | 全文 |
+| 开发约定与踩坑 | `AGENTS.md`（main 与 `1e727cd` 1072 行，trap 1–35；`4297621` 1091 行：`aed5fd9` 在开头加“Personal fork workflow”一节 `AGENTS.md:3-20`，其后行号 +19；HEAD 1134 行，末尾加 Windows_Linux 一节） | 两分支 | 全文 |
 | 架构 | `ARCHITECTURE.md`（§0–§9） | 两分支相同 | 全文 |
 | PRD | `PRD/PRD-v1.4.0.md` | 仅 main（合并 `0d54048` 时有意排除在 Windows_Linux 之外） | 全文 |
-| API 规范 | `API-SPEC-callable-render-service.md`（main 1052 行；Windows_Linux 1185 行，并逐行比较差异）；`API-SPEC-library-helper.md`（仅 main） | 两分支 | 全文 |
+| API 规范 | `API-SPEC-callable-render-service.md`（main 1052 行；`1e727cd` 1185 行，并逐行比较差异；`4297621` 1189 行，合并 `4297621` 在 §19 末尾加“Personal Windows fork integration”，`API-SPEC-callable-render-service.md:1187-1189`）；`API-SPEC-library-helper.md`（仅 main） | 两分支 | 全文 |
 | 前后端契约 | `CONTRACT-frontend-backend.md` | 两分支相同 | 全文 |
 | CI | `.github/workflows/build.yml`、`.github/workflows/desktop.yml`、`.github/scripts/host_hello.py` | 两分支（比较差异） | 全文 |
 | macOS 应用（UI 参考） | `modern_UI/Spektrafilm/README.md`；`Theme/Theme.swift`（令牌）；`Panels/`、`Panels/Sections/`、`Windows/`、`Canvas/`、`Controls/` 的文件结构；`Tools/` 下全部脚本；`SpektrafilmTests/` 的文件清单及 SurfaceAgreement、Licensing、Diagnostics、TypingKeyGuard、CompareAndFlags 等测试的文件头 | main | README 全文；其余摘读 |
 | Windows UI | `windows_UI/README.md`、`DESIGN_ALIGNMENT.md`、`THIRD_PARTY.md`、`build.ps1`、`setup-qt.ps1`、`CMakeLists.txt`、`dependencies/*.json`、`qml/*.qml`、`tests/*.cpp` | Windows_Linux | 文档与脚本全文；QML、测试摘读 |
-| Windows 前端（现行） | `desktop/HOST-PROTOCOL.md`、`NOTES.md`、`PARITY.md`、`PROTOCOL-REQUESTS.md`、`AGENTS-CLI.md`、`docs/WINDOWS-INSTALLER.md`、`package.json`、`src-tauri/tauri.conf.json`、`Cargo.toml`、`capabilities/default.json`；`src/`、`src-tauri/src/`、`tests/e2e/`、`scripts/`、`mock-host/` 的源码结构与相关段落 | Windows_Linux | 文档全文；源码摘读 |
+| Windows 前端（现行） | `desktop/HOST-PROTOCOL.md`、`NOTES.md`、`PARITY.md`、`PROTOCOL-REQUESTS.md`、`AGENTS-CLI.md`、`docs/WINDOWS-INSTALLER.md`、`package.json`、`src-tauri/tauri.conf.json`、`Cargo.toml`、`capabilities/default.json`；`src/`、`src-tauri/src/`、`tests/e2e/`、`scripts/`、`mock-host/` 的源码结构与相关段落；`4297621` 新增的 `docs/PR23-INTEGRATION-20261029.md`（合并 `4297621`）、`MACOS-MAIN-ALIGNMENT-CHECKLIST-20261028.md` 与 `docs/WINDOWS-FILM-MIGRATION-PLAN-20261028.md`（`ec59666`） | Windows_Linux | 文档全文；源码摘读；新增三份中 PR23-INTEGRATION 全文，其余两份摘读 |
 | 截图 | `screenshots/Screenshot_English.png`、`Screenshot_ZH_HANS.png`、`natural_halation.png`（`physically_accurate_grain.png` 只核对了存在） | 两分支相同 | 逐张查看 |
 | UI 参考图 | 原始参考图 `modern_UI/reference_layout/Main/sample_frontend.svg` 不在仓库（见下）；使用其等价物：`modern_UI/Spektrafilm/README.md` §1 的 SVG 实测数值表、`Theme.swift` 令牌、`windows_UI/DESIGN_ALIGNMENT.md`（对作者 `sample_frontend_v4.pdf` 的逐区转录） | main、Windows_Linux | 全文 |
-| 测试说明 | `README.md` “Test”；`AGENTS.md` “Building and testing”、“Test gates”；`ARCHITECTURE.md` §9；`modern_UI/Spektrafilm/README.md` §7；`desktop/NOTES.md`；`engine/tests/` 75 个文件（另有 `fixtures/` 目录）与 `engine/tools/` 15 个文件的文件头 | 两分支 | 全文 / 摘读 |
+| 测试说明 | `README.md` “Test”；`AGENTS.md` “Building and testing”、“Test gates”；`ARCHITECTURE.md` §9；`modern_UI/Spektrafilm/README.md` §7；`desktop/NOTES.md`；`engine/tests/` 75 个文件（另有 `fixtures/` 目录；`4297621` 为 77 个：`ec59666` 加 `gpu_vulkan_no_film.cpp`，合并 `4297621` 加 `host_no_film_upstream.py`）与 `engine/tools/` 15 个文件的文件头 | 两分支 | 全文 / 摘读 |
 | 构建脚本 | `engine/build.sh`、`build-linux.sh`、`build-windows.ps1`、`build-windows-cross.sh`、`setup-deps.sh`、`setup-libraw.sh/.ps1`、`setup-codecs.sh/.ps1`、`setup-input-codecs.py`、`setup-lens-codecs.py`、`stage-host.sh`、`cmake/*.cmake`、`cmake/*pins.json`、`engine/CMakeLists.txt`、`engine/host/CMakeLists.txt` | Windows_Linux（与 main 比较） | 全文 |
 | 发布脚本 | `modern_UI/Spektrafilm/Tools/package.sh`、`bundle-licenses.sh`、`check-bundle-resources.sh`；`desktop/scripts/package.mjs`、`build-agent.mjs`；`vendor/spklib/macos/spklib-host.sha256`（仅 main，并核对了哈希） | 两分支 | 全文 |
-| 内存、缓存、导出、色彩、诊断、性能的 RFC 或等价文档 | 上游 RFC 不在仓库（见下）。等价文档：`ARCHITECTURE.md` §4（内存）、§7.5（色彩链）、§7.6（状态与日志）、§7.8（导出）、§8.5（缓存）、§8.7–§8.9（速度与计时）；`engine/WINDOWS_MEMORY.md`、`WINDOWS_WIDE_GAMUT.md`、`WINDOWS_NATIVE_RAW.md`、`WINDOWS.md`、`LINUX_WINDOWS.md`、`PORT_PLAN.md`、`PORT_NOTES.md`、`PORT_COVERAGE.md`、`WINDOWS_FEATURE_COVERAGE.md`、`WINDOWS_DESKTOP.md`、`WINDOWS_FULL_MIGRATION_PLAN.md`、`WINDOWS_MIGRATION_VALIDATION_20261018.md`；`API-SPEC` §7、§17 | 两分支 | 全文 |
+| 内存、缓存、导出、色彩、诊断、性能的 RFC 或等价文档 | 上游 RFC 不在仓库（见下）。等价文档：`ARCHITECTURE.md` §4（内存）、§7.5（色彩链）、§7.6（状态与日志）、§7.8（导出）、§8.5（缓存）、§8.7–§8.9（速度与计时）；`engine/WINDOWS_MEMORY.md`、`WINDOWS_WIDE_GAMUT.md`、`WINDOWS_NATIVE_RAW.md`、`WINDOWS.md`、`LINUX_WINDOWS.md`、`PORT_PLAN.md`、`PORT_NOTES.md`、`PORT_COVERAGE.md`、`WINDOWS_FEATURE_COVERAGE.md`、`WINDOWS_DESKTOP.md`、`WINDOWS_FULL_MIGRATION_PLAN.md`、`WINDOWS_MIGRATION_VALIDATION_20261018.md`；`API-SPEC` §7、§17；`engine/MEMORY-MILESTONE-20261029.txt`（`bbf536d`，摘读） | 两分支 | 全文 |
 | 许可 | `license/LICENSE`、`license/SPEKTRAFILM_LICENSE.txt`、`CITATION.cff`、`engine/resources_product/NOTICE.md`、`engine/resources_product/fonts/README.md`、`engine/third_party/README.md`、`engine/third_party/stb/README.md` | 两分支 | 全文 |
-| 协作者分支 | 相对本基线的 `git diff --stat` 与提交说明 | evanfan005-bit/SpektraLab-Windows | 摘读 |
+| 基线的 5 个提交 | `git log 1e727cd..4297621` 的提交说明与 `git diff --stat`；改动的文档与工作流读 diff 全文（`AGENTS.md`、`README*`、`desktop/HOST-PROTOCOL.md`、`desktop/PARITY.md`、API-SPEC §19、`build.yml`、`desktop.yml`）；本文引用到的代码段（`engine/host/main.cpp`、`engine/src/pipeline/engine.cpp`、`engine/CMakeLists.txt`、`desktop/mock-host/core.ts`、`desktop/src/canvas/Canvas.tsx`、`desktop/src/windows/Dialogs.tsx`）；规范同步规则对其中 3 个非合并提交的回放（RFC-W001 §6.3） | evanfan005-bit/SpektraLab-Windows | 文档 diff 全文；代码摘读 |
 
 **要求读取、但仓库里没有的文件**（记录在案，不假装读过）：
 
@@ -75,7 +75,7 @@
 - **macOS 工具链专属**：Xcode 工程生成（X-01）、Swift `@Observable` 递归陷阱（X-04）、ImageIO 缩略图陷阱（X-05）、`footprint` 内存工具（M-02 调整为 Windows 指标）、Developer ID 签名与公证（B-06）、“发布是 ad-hoc zip”（X-06，在上游也已过时）。
 - **胶片模型专属的业务约束**：固定实验设置与 45 MP 样片路径（F-02）、Python 参考实现对照（F-03）、新增胶片的流程（F-10）。它们只约束共享引擎和胶片数据；Windows 前端与流程本身不受它们约束。仍然适用于共享引擎的规则（不污染材料模型、安全数学、对照门槛、光谱网格）标为“调整后适用”并限定范围（F-01、F-04–F-06）；随机效果的比较方法与配置数据的许可照原样适用（F-07、F-08）。
 - **形式调整**：PRD/RFC 从“本机不入库”改为入库 `docs/`，编号加 `W`（P-01、P-02）；Mac 的 Xcode 测试类门禁换成 vitest / cargo / CTest / unittest（T-01、T-02）；`XCTExpectFailure(strict:)` 换成 vitest `test.fails`（T-11）；`UserDefaults` 套件注入换成注入的 `localStorage` 与临时 `APPDATA`（T-08）；`TypingKeyGuard` 换成 WebView 键盘守卫（X-03）。
-- **用户要求中的品牌条款**：本项目就是 SpektraLab 仓库自己的 Windows 分支，品牌归仓库所有者，可以使用；但 Apple 平台专属素材不得搬到 Windows，第三方商标与 spektrafilm 名称另有限制（UI-17）。
+- **用户要求中的品牌条款**：本项目是 SpektraLab 上游 `Windows_Linux` 一线的 Windows 移植（在 fork 中开发，见 §1），品牌归上游仓库所有者，可以使用；但 Apple 平台专属素材不得搬到 Windows，第三方商标与 spektrafilm 名称另有限制（UI-17）。
 - **Windows 平台习惯优先**：标题栏、菜单、快捷键、文件对话框、高 DPI、触控板按 Windows 习惯，不为了像 macOS 而破坏（W-01–W-11）。
 
 ## 5. 合规矩阵
@@ -89,14 +89,14 @@
 | P-01 | 先建立 PRD 再编码：PRD 写清现状、要做什么、规则、验收、决策与待决问题，“nothing here is built”（main `PRD/PRD-v1.4.0.md` 开头、§7–§9） | 新功能先写 `docs/prd/PRD-Wnnn`；模板含背景、目标、需求、Windows 平台习惯、约束、验收、测量、决策、待决问题、范围之外；检查器校验章节与状态 | 调整后适用 | 上游 PRD 按发布版本写、且 `/PRD/` 被 `.gitignore:330` 设为本机保存，协作者看不到；本项目按功能写并入库，编号加 W 避免冲突 | `docs/prd/TEMPLATE.md`、`docs/prd/README.md`、`tools/process/check_process.py`、`tools/process/tests/test_check_process.py` |
 | P-02 | 模块与重大设计写 RFC（代码注释引用 RFC-014、RFC-018、RFC-019/020 等；PRD §10“每个功能变成一个 RFC”） | 模块写 `docs/rfc/RFC-Wnnn`；模板含摘要、现状、设计、接口与契约、影响评估（内存/缓存/色彩/导出/诊断/性能/许可）、测试计划、备选方案、发布迁移、决策记录 | 调整后适用 | 上游 `/rfc/` 不入库（`.gitignore:329`），编号 RFC-001…036 已占用；入库并加 W 前缀 | `docs/rfc/TEMPLATE.md`、`docs/rfc/RFC-W001-development-process-and-ci.md` |
 | P-03 | 重大决策带日期与决策人记录（`PRD-v1.4.0.md` §8；`AGENTS.md` 中“owner's decision, 2026-10-03”；`engine/PORT_PLAN.md` 开头 2026-10-06 决定） | PRD“决策”、RFC“决策记录”只追加；不属于模块的单项决定写 ADR | 完全适用 | — | `docs/adr/TEMPLATE.md`、`docs/adr/README.md` |
-| P-04 | 架构文档是当前事实而非事后宣传（`ARCHITECTURE.md` 标注“Current as of”；`AGENTS.md:33-43` 截图揭穿过时描述） | 流程文档标为现行事实；工作流一改，同一范围必须改流程文档的 CI 表（`sync:ci-gates-doc`）；检查器改动必须改 RFC-W001 | 完全适用 | — | `docs/process/DEVELOPMENT-PROCESS.md`、`tools/process/sync_rules.json` |
+| P-04 | 架构文档是当前事实而非事后宣传（`ARCHITECTURE.md` 标注“Current as of”；`AGENTS.md:52-62` 截图揭穿过时描述） | 流程文档标为现行事实；工作流一改，同一范围必须改流程文档的 CI 表（`sync:ci-gates-doc`）；检查器改动必须改 RFC-W001 | 完全适用 | — | `docs/process/DEVELOPMENT-PROCESS.md`、`tools/process/sync_rules.json` |
 | P-05 | API 与前后端边界有正式契约：线上只有约定的通道，字段、层级、分辨率档名都属契约（`CONTRACT-frontend-backend.md` §1；`API-SPEC-callable-render-service.md`） | 沿用：渲染接口以 API-SPEC 为准；Windows 进程边界以宿主协议为准 | 完全适用 | — | `API-SPEC-callable-render-service.md`、`desktop/HOST-PROTOCOL.md`、`desktop/src/shared/protocol.ts` |
-| P-06 | 接口变更同步更新规范：“a wire change edits its section in the same commit”（`AGENTS.md:62-68`、`ARCHITECTURE.md:662-665`）；宿主协议的破坏性变更同一提交改协议文档（`desktop/HOST-PROTOCOL.md:15-17`） | 做成自动检查：`kFields` 表、宿主方法集与 `protocol.ts` 变化时，同一提交范围必须改对应规范，否则 CI 失败；非接口改动用 `Spec-Sync-Waiver` 说明理由 | 调整后适用 | 比上游更严：宿主协议的增量变更也要同步改文档，因为回放历史时唯一的真遗漏（`no_film`、`hello.frame_options`）就是增量变更；C ABI 不设规则，上游以头文件注释为其文档（RFC-W001 §7） | `tools/process/sync_rules.json`、`tools/process/check_process.py`、`.github/workflows/process.yml` |
+| P-06 | 接口变更同步更新规范：“a wire change edits its section in the same commit”（`AGENTS.md:81-87`、`ARCHITECTURE.md:662-665`）；宿主协议的破坏性变更同一提交改协议文档（`desktop/HOST-PROTOCOL.md:15-17`） | 做成自动检查：`kFields` 表、宿主方法集与 `protocol.ts` 变化时，同一提交范围必须改对应规范，否则 CI 失败；非接口改动用 `Spec-Sync-Waiver` 说明理由 | 调整后适用 | 比上游更严：宿主协议的增量变更也要同步改文档，因为回放历史（截至 `1e727cd`）时唯一的真遗漏（`no_film`、`hello.frame_options`）就是增量变更（基线 fork 在 `ec59666` 与合并 `4297621` 补上，见 §6 第 3 条）；C ABI 不设规则，上游以头文件注释为其文档（RFC-W001 §7） | `tools/process/sync_rules.json`、`tools/process/check_process.py`、`.github/workflows/process.yml` |
 | P-07 | 版本协商与破坏性变更流程：transport / schema 版本只在规定情况下升级；破坏性变更先加新、旧的弃用、下个周期再删（`CONTRACT-frontend-backend.md` §2） | 沿用；宿主协议的破坏性变更升级 `hello.protocol` 并同提交改协议文档；CI 用 `host_hello.py` 确认协议号 | 完全适用 | — | `.github/scripts/host_hello.py`、`docs/process/DEVELOPMENT-PROCESS.md` |
 | P-08 | 跨边界请求只追加、不改别人的条目，标注状态（`CONTRACT-frontend-backend.md` §5；`desktop/PROTOCOL-REQUESTS.md` 的 open / landed / declined） | 沿用；落地时更新标记（R4 目前标记滞后，见 §6） | 完全适用 | — | `desktop/PROTOCOL-REQUESTS.md` |
 | P-09 | 每个声明都要有测量或测试支撑：“Measure, then claim”（`AGENTS.md` Conventions；`PRD-v1.4.0.md` 规则 7） | PRD 必须有“测量计划”，RFC 必须有“影响评估”和“测试计划”；PR 模板要求附测量与门禁记录 | 完全适用 | — | `docs/prd/TEMPLATE.md`、`docs/rfc/TEMPLATE.md`、`.github/pull_request_template.md` |
-| P-10 | 规范文档由改动者维护（`AGENTS.md:62-68`，所有者 2026-10-03 决定）；同文件另有旧规则“编辑前先说明”（`AGENTS.md:1048-1050`） | 按较新的所有者决定：改动者负责同步改文档，并在提交信息和 PR 中写明改了哪些规范文档 | 调整后适用 | 上游两条规则互相矛盾；后者属于双会话分工时期，所有者已在前者中取消“先说明”的要求 | `.github/pull_request_template.md` |
-| P-11 | 记录真实踩坑，持续更新 `AGENTS.md`（trap 1–35，每条写现象、原因、如何发现、守护测试） | 跨模块的 Windows 坑写进 `AGENTS.md` 末尾 Windows_Linux 一节，模块内的写进模块文档并在 `AGENTS.md` 留指针；格式：现象 → 原因 → 修复 → 守护测试 | 调整后适用 | `AGENTS.md` 与 `main` 共用，大段改写会造成每次合并冲突；集中在文件末尾一节追加 | `AGENTS.md`、`docs/process/DEVELOPMENT-PROCESS.md` |
+| P-10 | 规范文档由改动者维护（`AGENTS.md:81-87`，所有者 2026-10-03 决定）；同文件另有旧规则“编辑前先说明”（`AGENTS.md:1067-1069`） | 按较新的所有者决定：改动者负责同步改文档，并在提交信息和 PR 中写明改了哪些规范文档 | 调整后适用 | 上游两条规则互相矛盾；后者属于双会话分工时期，所有者已在前者中取消“先说明”的要求 | `.github/pull_request_template.md` |
+| P-11 | 记录真实踩坑，持续更新 `AGENTS.md`（trap 1–35，每条写现象、原因、如何发现、守护测试） | 跨模块的 Windows 坑写进 `AGENTS.md` 末尾 Windows_Linux 一节，模块内的写进模块文档并在 `AGENTS.md` 留指针；格式：现象 → 原因 → 修复 → 守护测试 | 调整后适用 | `AGENTS.md` 与 `main` 共用，大段改写会造成每次合并冲突；集中在文件末尾一节追加（基线 `4297621` 已比 `main` 多出 `aed5fd9` 加在开头的一节，`AGENTS.md:3-20`） | `AGENTS.md`、`docs/process/DEVELOPMENT-PROCESS.md` |
 | P-12 | 覆盖矩阵用固定状态词汇，改动者负责更新（`desktop/PARITY.md` 的 ported / partial / stub / skipped；`engine/PORT_COVERAGE.md`） | 沿用；参考审计矩阵同样使用固定词汇，并由检查器核对计数 | 完全适用 | — | `desktop/PARITY.md`、`engine/PORT_COVERAGE.md`、`tools/process/check_process.py` |
 | P-13 | 能力声明必须真实：未移植就是不支持，请求被拒绝时会话不变（`engine/PORT_PLAN.md` 开头；`engine/WINDOWS_FEATURE_COVERAGE.md`） | 沿用：引擎在 `unsupported_features` 中声明，前端据此禁用控件并说明原因 | 完全适用 | — | `engine/src/pipeline/engine.cpp`、`desktop/src/panels/gate.ts` |
 
@@ -104,15 +104,15 @@
 
 | ID | SpektraLab规范 | 本项目如何采用 | 是否完全适用 | 调整理由 | 对应代码/测试 |
 |---|---|---|---|---|---|
-| T-01 | 使用最小测试门禁开发：只跑能抓到改动的测试类（`AGENTS.md:211-226`） | 按改动范围列出窄门禁：vitest 单文件、`cargo test`、Playwright 单个 spec、CTest、Python unittest、流程检查 | 调整后适用 | 上游门禁是 Xcode 测试类（`-only-testing:`）；Windows 端的测试框架不同，目的相同 | `docs/process/DEVELOPMENT-PROCESS.md` |
-| T-02 | 集成节点运行完整测试：一组提交后、推送前跑一次全量（`AGENTS.md:219-222`） | 推送前本地跑集成门禁；推送到 `windows_linux2` 后 CI 跑全部任务，作为批准合并的证据 | 调整后适用 | 上游全量测试只在本机跑（CI 只编译，`build.yml:1-7`）；Windows 端大部分检查能在托管运行器上跑，于是放进 CI | `.github/workflows/process.yml`、`.github/workflows/desktop.yml` |
-| T-03 | 提交记录所跑的窄门禁（`AGENTS.md:225-226`） | 提交正文写 `Gate:`；改了代码却没有门禁记录的提交，CI 给出警告 | 调整后适用 | 先警告不阻塞：2026-10-01 以来 139 个改代码的提交只有 52 个有这类记录，立即强制会卡住协作者（RFC-W001 §7） | `tools/process/check_process.py` |
-| T-04 | 新回归测试先证明能够失败，再证明修复后通过（`AGENTS.md:216-218`；`ARCHITECTURE.md` §9） | 提交写 `Red before:`；PR 模板必填；检查器的 33 个结果代码逐个屏蔽，每个都有测试变红（RFC-W001 §6.2） | 完全适用 | — | `tools/process/tests/test_check_process.py`、`.github/pull_request_template.md` |
+| T-01 | 使用最小测试门禁开发：只跑能抓到改动的测试类（`AGENTS.md:230-245`） | 按改动范围列出窄门禁：vitest 单文件、`cargo test`、Playwright 单个 spec、CTest、Python unittest、流程检查 | 调整后适用 | 上游门禁是 Xcode 测试类（`-only-testing:`）；Windows 端的测试框架不同，目的相同 | `docs/process/DEVELOPMENT-PROCESS.md` |
+| T-02 | 集成节点运行完整测试：一组提交后、推送前跑一次全量（`AGENTS.md:238-241`） | 推送前本地跑集成门禁；推送到 `windows2` 与开 PR 时 CI 跑全部任务（HEAD 的 `desktop.yml:29-37` 监听 `windows2` 的推送、PR 与手动触发；`process.yml` 监听所有推送与 PR），作为用户审核、本人提 PR 的依据 | 调整后适用 | 上游全量测试只在本机跑（CI 只编译，`build.yml:1-7`）；基线 fork 在 `aed5fd9` 把 `build.yml`、`desktop.yml` 都改为只手动触发，并规定其 fork 流程优先于继承的推送前全量门禁（`AGENTS.md:14-19`）；Windows 端大部分检查能在托管运行器上跑，本项目为 `windows2` 与 PR 恢复 `desktop.yml` 的自动触发 | `.github/workflows/process.yml`、`.github/workflows/desktop.yml` |
+| T-03 | 提交记录所跑的窄门禁（`AGENTS.md:244-245`） | 提交正文写 `Gate:`；改了代码却没有门禁记录的提交，CI 给出警告 | 调整后适用 | 先警告不阻塞：2026-10-01 00:00（+0800）以来到 `1e727cd` 139 个改代码的非合并提交只有 52 个有这类记录，到 `4297621` 是 142 个中 52 个（基线 fork 的 3 个非合并提交都没有），立即强制会卡住协作者（RFC-W001 §7） | `tools/process/check_process.py` |
+| T-04 | 新回归测试先证明能够失败，再证明修复后通过（`AGENTS.md:235-237`；`ARCHITECTURE.md` §9） | 提交写 `Red before:`；PR 模板必填；检查器的 33 个结果代码逐个屏蔽，每个都有测试变红（RFC-W001 §6.2） | 完全适用 | — | `tools/process/tests/test_check_process.py`、`.github/pull_request_template.md` |
 | T-05 | 守卫必须能触发，测试要带能复现缺陷的对照（trap 16；`TypingKeyGuardTests` 对照；`check_math_guard.sh`） | 沿用：Vulkan 数学门有故意破坏的对照着色器；检查器的每个结果代码都有必须出现该代码的负向夹具 | 完全适用 | — | `engine/tests/gpu_vulkan_math_gate.cpp`、`engine/tests/math_gate_fault.comp`、`tools/process/tests/test_check_process.py` |
 | T-06 | 读耗时，不只读失败数：跳过的套件与完整套件都报 0 失败（trap 26） | 门禁记录写耗时与用例数；CI 中缺少 git 判失败（`SPK_REQUIRE_GIT=1`）；真实宿主测试在环境变量已设而路径无效时失败而非跳过 | 完全适用 | — | `.github/workflows/process.yml`、`desktop/src/export/realhost.test.ts` |
 | T-07 | 跳过的检查不能看起来像通过（缺少 `objdump` 时导入检查失败） | 沿用；流程检查无法运行时退出码 2，从不报告通过 | 完全适用 | — | `engine/build-windows-cross.sh`、`tools/process/check_process.py` |
 | T-08 | 测试必须隔离共享设置：注入一次性的 `UserDefaults` 套件，不读共享存储（trap 24） | 前端注入设置存储；Rust 测试用临时目录；需要 `APPDATA` 的冒烟测试把它指向临时目录 | 调整后适用 | 平台机制不同（`localStorage`、`%APPDATA%`），原则相同 | `desktop/src/state/settings.ts`、`desktop/agent/smoke.py`、`desktop/src/controls/PanelResize.test.tsx` |
-| T-09 | 夹具先复制再打开，相机文件不入库（`AGENTS.md:1025-1027`；`engine/LINUX_WINDOWS.md:173-176`） | 沿用：宿主测试生成自己的 PNG / TIFF / EXR，RAW 先复制到临时目录 | 完全适用 | — | `engine/tests/host_lens.py`、`engine/tests/host_source.py`、`engine/tests/fixtures/windows` |
+| T-09 | 夹具先复制再打开，相机文件不入库（`AGENTS.md:1044-1046`；`engine/LINUX_WINDOWS.md:173-176`） | 沿用：宿主测试生成自己的 PNG / TIFF / EXR，RAW 先复制到临时目录 | 完全适用 | — | `engine/tests/host_lens.py`、`engine/tests/host_source.py`、`engine/tests/fixtures/windows` |
 | T-10 | 不污染用户真实文件：除导出外不写照片文件夹，sidecar 在应用数据目录（`ARCHITECTURE.md` §7.6；trap 35） | 沿用：sidecar 在 `%APPDATA%\app.spektralab.desktop\Sidecars`，旧的同目录 sidecar 首次读取时迁走（与 Mac 相同）；输出路径必须新建，工具拒绝覆盖 | 完全适用 | — | `desktop/src-tauri/src/files.rs`、`engine/tools/windows_preview_smoke.py` |
 | T-11 | 已知缺陷用严格的预期失败固定，修复它的提交才能去掉标记（`XCTExpectFailure(strict: true)`，trap 33） | 用 vitest `test.fails` 表达同一语义；目前没有被固定的已知缺陷 | 调整后适用 | XCTest 机制只在 macOS；换成前端测试框架的等价写法 | `docs/process/DEVELOPMENT-PROCESS.md` |
 | T-12 | 断言独立事实而不是代码自己的输出（`ColourManagementTests` 手算答案；Metal 为参照） | Vulkan 引擎以 Metal 为参照评分；前端几何测试以手算点对为参照 | 完全适用 | — | `engine/tests/parity_metal_vulkan.py`、`desktop/src/shared/geometry.test.ts` |
@@ -152,7 +152,7 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 | UI-14 | 参数变化成本明确：重新解码、引擎渲染、只重绘一次各有其位置（`ARCHITECTURE.md` §7.1 代价表） | 同样的分区；预览构建状态显示正在做什么 | 完全适用 | — | `desktop/src/windows/PreviewBuildStatus.tsx`、`desktop/src/state/previewQueue.ts` |
 | UI-15 | 界面在长任务中保持响应：渲染合并（发送 / 需要）、过期结果丢弃、批量导出逐张可取消 | 同样；引擎在独立进程，超时、重启与租约防止界面卡死 | 完全适用 | — | `desktop/src/state/previewQueue.ts`、`desktop/src-tauri/src/host.rs`、`desktop/tests/e2e/preview-switch.spec.ts` |
 | UI-16 | 界面显示内容与最终导出内容一致 | 见 C-01、C-02 | 完全适用 | — | `desktop/src/shared/surfaces.test.ts`、`desktop/src/export/exporter.test.ts` |
-| UI-17 | （本次任务要求）不得直接复制 SpektraLab 的品牌、图标、商标、专用素材或产品名称 | 本项目就是 SpektraLab 仓库自己的 Windows 分支，名称与应用图标归仓库所有者，继续使用；不把 Apple 平台专属素材搬到 Windows（SF Symbols 已改为自绘 SVG）；第三方商标（胶片包装封面）与 spektrafilm 名称的使用列为待处理问题（§6） | 调整后适用 | 这条要求针对“另做一个产品”；评估后本项目不是另一个产品。真正需要遵守的是 Apple 素材许可、第三方商标和 spektrafilm 许可中“名称不在授权范围”的要求 | `desktop/src/controls/icons.tsx`、`desktop/scripts/copy-assets.mjs`、`desktop/src-tauri/tauri.conf.json` |
+| UI-17 | （本次任务要求）不得直接复制 SpektraLab 的品牌、图标、商标、专用素材或产品名称 | 本项目是 SpektraLab 上游 `Windows_Linux` 一线的 Windows 移植（在 fork 中开发，见 §1），名称与应用图标归上游仓库所有者，继续使用；不把 Apple 平台专属素材搬到 Windows（SF Symbols 已改为自绘 SVG）；第三方商标（胶片包装封面）与 spektrafilm 名称的使用列为待处理问题（§6） | 调整后适用 | 这条要求针对“另做一个产品”；评估后本项目不是另一个产品。真正需要遵守的是 Apple 素材许可、第三方商标和 spektrafilm 许可中“名称不在授权范围”的要求 | `desktop/src/controls/icons.tsx`、`desktop/scripts/copy-assets.mjs`、`desktop/src-tauri/tauri.conf.json` |
 | UI-18 | 本地化：英文与简体中文，胶片与相纸名称不翻译，字符串从 Swift 源生成 | 同样 | 完全适用 | — | `desktop/src/i18n/en.json`、`desktop/src/i18n/zh-Hans.json`、`desktop/scripts/extract-strings.mjs` |
 | UI-19 | 布局按参考图实测（SVG 数值 ÷ 2，误差 2 pt；`measure-layout.swift`） | 令牌从 `Theme.swift` 移植；用 Playwright 布局与交互用例守护 | 调整后适用 | 参考图不在仓库（`.gitignore:334-335`），Windows 无法跑 Swift 测量工具；以已移植的令牌和端到端用例为准 | `desktop/src/styles/theme.css`、`desktop/tests/e2e/editor.spec.ts`、`desktop/playwright.config.ts` |
 
@@ -195,12 +195,12 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 |---|---|---|---|---|---|
 | B-01 | 构建有可复现脚本，工程文件由生成器确定性生成（`engine/build.sh`、`Tools/gen-project.py`） | 引擎：`build-linux.sh`、`build-windows-cross.sh`、`build-windows.ps1`；前端：`npm ci` + 锁文件、`cargo --locked` | 调整后适用 | Windows 原生构建依赖手工准备的 `..\deps`（cmake、glslang、Vulkan-Headers），尚无脚本（§6） | `engine/build-linux.sh`、`engine/build-windows-cross.sh`、`engine/build-windows.ps1`、`desktop/package-lock.json` |
 | B-02 | 依赖按版本与 SHA 固定，校验不符就拒绝而不是修复，CMake 不下载 | 沿用 | 完全适用 | — | `engine/setup-deps.sh`、`engine/setup-libraw.ps1`、`engine/cmake/input-codecs-pins.json`、`engine/cmake/lens-codecs-pins.json` |
-| B-03 | 发出去的就是测过的：用打包后的资源再跑检查（`AGENTS.md:189-197`；`check-bundle-resources.sh`） | CI 在真实 Windows 上静默安装安装包，再问已安装的宿主 `hello` | 调整后适用 | 机制不同（安装包而非 .app 包）；目前不检查安装目录里的许可文件（§6 第 25 条） | `.github/workflows/desktop.yml`、`.github/scripts/host_hello.py` |
+| B-03 | 发出去的就是测过的：用打包后的资源再跑检查（`AGENTS.md:209-217`；`check-bundle-resources.sh`） | CI 在真实 Windows 上静默安装安装包，再问已安装的宿主 `hello` | 调整后适用 | 机制不同（安装包而非 .app 包）；目前不检查安装目录里的许可文件（§6 第 25 条） | `.github/workflows/desktop.yml`、`.github/scripts/host_hello.py` |
 | B-04 | 许可文本随包，并测试其内容与 About 面板读取路径（`bundle-licenses.sh`、`LicensingTests`） | 宿主的第三方声明由 `stage-host.sh` 汇集，缺文件即失败 | 调整后适用 | Windows 端尚无内容测试；About 面板显示的是 macOS 的 README，随包还带着用不到的 metal-cpp 许可（§6 第 13 条） | `engine/stage-host.sh`、`desktop/scripts/copy-assets.mjs` |
 | B-05 | 不引入与 GPL 不兼容的依赖（`AGENTS.md` “Do not”） | 沿用；RFC 的影响评估必须写新依赖的许可证 | 完全适用 | — | `engine/LINUX_WINDOWS.md`、`docs/rfc/TEMPLATE.md` |
 | B-06 | 签名、公证、Gatekeeper 验证（`Tools/package.sh`：Developer ID → notarytool → spctl） | 不采用 macOS 机制；Windows 等价物（Authenticode 代码签名）尚未实现 | 经评估后不适用 | macOS 专属；Windows 签名方案是待决问题（RFC-W001 §10），当前安装包未签名 | `desktop/docs/WINDOWS-INSTALLER.md` |
 | B-07 | 版本号只在一处定义（`gen-project.py` 的 `MARKETING_VERSION`） | Windows 版本号在三个文件中，必须一起改 | 调整后适用 | Tauri 的版本号分布在 npm、Tauri 配置与 Cargo 三处 | `desktop/package.json`、`desktop/src-tauri/tauri.conf.json`、`desktop/src-tauri/Cargo.toml` |
-| B-08 | CI 只做本地看不到的事：干净检出能否构建（`build.yml:1-7`） | 沿用并扩展：干净检出的构建、测试、打包、安装都在 CI | 调整后适用 | Windows 端的测试不依赖相机样片和 Mac GPU，能在托管运行器上跑，因此 CI 做得比上游多 | `.github/workflows/desktop.yml`、`.github/workflows/process.yml` |
+| B-08 | CI 只做本地看不到的事：干净检出能否构建（`build.yml:1-7`） | 沿用并扩展：干净检出的构建、测试、打包、安装都在 CI，`windows2` 的推送与 PR 自动触发；macOS 的 `build.yml` 在基线 fork 中只手动触发（`aed5fd9`，`build.yml:11-13`），本项目沿用（§6 第 24 条） | 调整后适用 | Windows 端的测试不依赖相机样片和 Mac GPU，能在托管运行器上跑，因此 CI 做得比上游多 | `.github/workflows/desktop.yml`、`.github/workflows/process.yml` |
 | B-09 | 发布有端到端脚本（`package.sh`：归档 → 导出 → 校验 → DMG → 公证） | NSIS / .deb / AppImage 由脚本生成；发布上传与便携 ZIP 仍是手工 | 调整后适用 | 平台不同；发布自动化尚缺（§6） | `desktop/scripts/package.mjs`、`desktop/scripts/build-agent.mjs` |
 | B-10 | 导入白名单：Windows 可执行文件只能导入系统 DLL，检查工具缺失即失败 | 沿用 | 完全适用 | — | `engine/build-windows-cross.sh` |
 | B-11 | 构建证据清单：工具链、源码、着色器、产物哈希（`toolchain.json`） | 沿用；清单尚不含 `engine/host/` 源码与宿主可执行文件的哈希（§6） | 调整后适用 | 现有清单覆盖不全，补齐前不能当作宿主构建的完整证据 | `engine/build-windows.ps1` |
@@ -210,14 +210,14 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 
 | ID | SpektraLab规范 | 本项目如何采用 | 是否完全适用 | 调整理由 | 对应代码/测试 |
 |---|---|---|---|---|---|
-| G-01 | Windows 与 Linux 的工作只进 `Windows_Linux`，不进 `main`（`README.md:138-140`） | 沿用；先推到暂存分支 `windows_linux2`，批准后合并进 `Windows_Linux` | 完全适用 | — | `docs/process/DEVELOPMENT-PROCESS.md` |
-| G-02 | 拆成可审阅的提交，一个提交一件事，说明做了什么和为什么（`README.md:141-144`） | 沿用；PR 模板要求 | 完全适用 | — | `.github/pull_request_template.md` |
-| G-03 | 尊重开源社区：保留许可与致谢（`README.md:145-146`） | 沿用 | 完全适用 | — | `license/LICENSE`、`license/SPEKTRAFILM_LICENSE.txt`、`CITATION.cff` |
-| G-04 | 未经要求不提交、不推送（`AGENTS.md` “Do not”；`engine/WINDOWS_MEMORY.md` 末尾） | 按用户指示：本地验证后推送到 `windows_linux2`；合并进 `Windows_Linux` 必须等负责人批准 | 调整后适用 | 用户明确要求推送暂存分支；合并仍需批准 | `docs/process/DEVELOPMENT-PROCESS.md` |
+| G-01 | Windows 与 Linux 的工作只进 `Windows_Linux`，不进 `main`（`README.md:155-157`） | 沿用：开发在本地文件夹与用户 fork `fengk623/SpektraLab-Windows` 的 `windows2` 上进行，CI 在 `windows2` 的推送与 PR 上运行，用户审核后本人提 PR 合并；Windows / Linux 工作不进 `main` | 完全适用 | — | `docs/process/DEVELOPMENT-PROCESS.md` |
+| G-02 | 拆成可审阅的提交，一个提交一件事，说明做了什么和为什么（`README.md:158-161`） | 沿用；PR 模板要求 | 完全适用 | — | `.github/pull_request_template.md` |
+| G-03 | 尊重开源社区：保留许可与致谢（`README.md:162-163`） | 沿用 | 完全适用 | — | `license/LICENSE`、`license/SPEKTRAFILM_LICENSE.txt`、`CITATION.cff` |
+| G-04 | 未经要求不提交、不推送（`AGENTS.md` “Do not”；`engine/WINDOWS_MEMORY.md` 末尾） | 按用户指示：只在本地文件夹与用户 fork 的 `windows2` 上开发；本地验证后推送到 `windows2`，CI 在其推送与 PR 上运行；合并只通过用户审核后本人提交的 PR；从不向 JamesQiu2005/SpektraLab 的 `main`、`Windows_Linux` 或 evanfan005-bit 的分支推送 | 调整后适用 | 用户明确要求推送到自己 fork 的 `windows2`，合并由用户本人提 PR。基线 fork 的规则是经授权后直接推送到其 `Windows_Linux`、不开 PR（`AGENTS.md:9-12`、`README.md:7-9`），本项目不沿用：PR 是用户审核的入口 | `docs/process/DEVELOPMENT-PROCESS.md` |
 | G-05 | 不 rebase、不强推对方可能已读的分支；不在仓库根目录 stash / clean（`CONTRACT-frontend-backend.md` §4.1） | 沿用 | 完全适用 | — | `docs/process/DEVELOPMENT-PROCESS.md` |
-| G-06 | 前后端文件所有权划分（`CONTRACT-frontend-backend.md` §4） | 不按 FE / BE 划分目录；保留其仍有效的部分：宿主协议归后端，前端只追加请求 | 调整后适用 | 上游已说明 §4 是历史，不再分派任何东西（`AGENTS.md:57-62`） | `desktop/PROTOCOL-REQUESTS.md`、`desktop/HOST-PROTOCOL.md` |
-| G-07 | 合并 main 时按模块合并，先保留本地工作，按内容而非提交数比较（`engine/WINDOWS_FULL_MIGRATION_PLAN.md:16`） | 沿用 | 完全适用 | — | `engine/WINDOWS_FULL_MIGRATION_PLAN.md` |
-| G-08 | 外部补丁要审查，不继承其声明（`engine/PORT_NOTES.md` 关于外部 FMA 补丁的记录） | 沿用；协作者分支的改动按模块审阅后再并入 | 完全适用 | — | `engine/PORT_NOTES.md` |
+| G-06 | 前后端文件所有权划分（`CONTRACT-frontend-backend.md` §4） | 不按 FE / BE 划分目录；保留其仍有效的部分：宿主协议归后端，前端只追加请求 | 调整后适用 | 上游已说明 §4 是历史，不再分派任何东西（`AGENTS.md:76-81`） | `desktop/PROTOCOL-REQUESTS.md`、`desktop/HOST-PROTOCOL.md` |
+| G-07 | 合并 main 时按模块合并，先保留本地工作，按内容而非提交数比较（`engine/WINDOWS_FULL_MIGRATION_PLAN.md:16`） | 沿用；基线本身就是这样合并的：`ec59666` 先保全本地未提交的工作，再以真实合并（不是挑拣提交）并入 PR #23（`desktop/docs/PR23-INTEGRATION-20261029.md:5-8`） | 完全适用 | — | `engine/WINDOWS_FULL_MIGRATION_PLAN.md`、`desktop/docs/PR23-INTEGRATION-20261029.md` |
+| G-08 | 外部补丁要审查，不继承其声明（`engine/PORT_NOTES.md` 关于外部 FMA 补丁的记录） | 沿用；基线 fork 的 5 个提交按本审计复核（§6 各条的 `4297621` 状态），不继承其验证声明：`4297621` 的验证日志是未入库的 `build/` 文件（`desktop/docs/PR23-INTEGRATION-20261029.md:28`） | 完全适用 | — | `engine/PORT_NOTES.md`、`desktop/docs/PR23-INTEGRATION-20261029.md` |
 
 ### 5.9 胶片模型专属规则（F）
 
@@ -225,9 +225,9 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 
 | ID | SpektraLab规范 | 本项目如何采用 | 是否完全适用 | 调整理由 | 对应代码/测试 |
 |---|---|---|---|---|---|
-| F-01 | 不为修渲染问题去污染材料模型：配置描述测得的能力，不是控制面（`AGENTS.md:17-23`） | 只在修改 `engine/src`、`engine/resources*` 时适用 | 调整后适用 | 约束共享引擎与数据；Windows 前端与流程不涉及材料模型 | `engine/resources/profiles`、`engine/resources_product/NOTICE.md` |
+| F-01 | 不为修渲染问题去污染材料模型：配置描述测得的能力，不是控制面（`AGENTS.md:36-42`） | 只在修改 `engine/src`、`engine/resources*` 时适用 | 调整后适用 | 约束共享引擎与数据；Windows 前端与流程不涉及材料模型 | `engine/resources/profiles`、`engine/resources_product/NOTICE.md` |
 | F-02 | 固定实验设置：Portra 400 + Portra Endura，1 MP 冒烟图，45 MP NEF（`AGENTS.md` “Fixed experimental setup”） | 不采用；Windows 使用自带的合成夹具与开发者自己的 RAW | 经评估后不适用 | 所列样片不在仓库，路径是作者的 Mac；Windows 测试自己生成输入 | `engine/tests/fixtures/windows`、`engine/tests/host_smoke.py` |
-| F-03 | 用 Python 参考实现（`PYTHONPATH` 指向作者机器上的 fork）跑 parity 套件（`AGENTS.md` “The engine”） | 不在 Windows 上采用；改用 Mac 上的 Vulkan 对 Metal 对照，以及本地 float64 / 解析参照的内核门 | 经评估后不适用 | 参考实现与 Mac dylib 都不在 Windows；对照方式由 `engine/LINUX_WINDOWS.md` §7 规定 | `engine/tests/parity_metal_vulkan.py`、`engine/tests/gpu_vulkan_pointwise.cpp` |
+| F-03 | 用 Python 参考实现（`PYTHONPATH` 指向作者机器上的 fork）跑 parity 套件（`AGENTS.md` “The engine”） | 不在 Windows 上采用；改用 Mac 上的 Vulkan 对 Metal 对照（`4297621` 中 `engine.cpp` 的 Mac Vulkan 构建守卫有变化，见 §6 第 26 条），以及本地 float64 / 解析参照的内核门 | 经评估后不适用 | 参考实现与 Mac dylib 都不在 Windows；对照方式由 `engine/LINUX_WINDOWS.md` §7 规定 | `engine/tests/parity_metal_vulkan.py`、`engine/tests/gpu_vulkan_pointwise.cpp` |
 | F-04 | 内核使用安全数学，数学探针能拒绝快速数学（`engine/build.sh` 的 Metal 选项；`check_math_guard.sh`） | Vulkan 的等价物：FMA 门与 split product，带故意破坏的对照 | 调整后适用 | Metal 选项只在 macOS；Vulkan 有自己的门 | `engine/tests/gpu_vulkan_math_gate.cpp`、`engine/tests/math_gate_fault.comp` |
 | F-05 | 渲染对照门槛实测而定，不收紧到 float32 epsilon，不放宽（`ARCHITECTURE.md` §8.6，3e-5） | 跨后端门槛以 8 位码值表示（最大 ≤1、平均 ≤0.01、CIEDE2000），并配负向对照 | 调整后适用 | 对照对象从 Python 参考变成 Metal，单位随之改变 | `engine/tests/parity_metal_vulkan.py` |
 | F-06 | 不改光谱形状（81 × 5 nm）、配置数据与对数曝光轴；共享引擎实现陷阱（trap 20、21、22） | 只在修改共享引擎时适用 | 调整后适用 | 约束共享引擎；Windows 前端与流程不涉及 | `engine/src/core` |
@@ -241,11 +241,11 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 | ID | SpektraLab规范 | 本项目如何采用 | 是否完全适用 | 调整理由 | 对应代码/测试 |
 |---|---|---|---|---|---|
 | X-01 | 增删源文件后运行 `Tools/gen-project.py` 重新生成 Xcode 工程 | 不采用 | 经评估后不适用 | Xcode 专属；Windows 端用 CMake、npm 与 Cargo，不需要生成工程文件 | —（Xcode 专属） |
-| X-02 | 离屏截图看不到 `CAMetalLayer`，只有真实窗口截图能证明画布在绘制（`AGENTS.md:265-291`；`capture-live.sh`） | 原则采用：Playwright（mock host）之外，界面改动要在 Windows 真实窗口检查，PR 写明缩放与显示器 | 调整后适用 | 工具是 macOS 的；原则平台无关 | `docs/process/DEVELOPMENT-PROCESS.md`、`.github/pull_request_template.md` |
+| X-02 | 离屏截图看不到 `CAMetalLayer`，只有真实窗口截图能证明画布在绘制（`AGENTS.md:284-310`；`capture-live.sh`） | 原则采用：Playwright（mock host）之外，界面改动要在 Windows 真实窗口检查，PR 写明缩放与显示器 | 调整后适用 | 工具是 macOS 的；原则平台无关 | `docs/process/DEVELOPMENT-PROCESS.md`、`.github/pull_request_template.md` |
 | X-03 | AppKit 先把按键交给菜单，单键快捷键会在文本框里触发（trap 32，`TypingKeyGuard`） | 同一问题在 WebView 中的守卫：单键不注册为菜单加速键，文本框中让位 | 调整后适用 | 机制不同，问题相同 | `desktop/src/windows/keys.ts`、`desktop/src/windows/keys.test.ts` |
 | X-04 | `@Observable` 中自赋值的 `didSet` 会无限递归（trap 25） | 不采用 | 经评估后不适用 | Swift 专属，Windows 端没有 Swift 代码 | —（Swift 专属） |
 | X-05 | `kCGImageDestinationEmbedThumbnail` 对 TIFF 无效，预览要按页读取（trap 29） | 不采用其机制；TIFF 预览页由宿主自己写 | 经评估后不适用 | ImageIO 专属 | `engine/host/tiff_ifd.cpp` |
-| X-06 | “Releases are ad-hoc zips … do not re-propose”（`AGENTS.md:1032-1033`） | 不采用 | 经评估后不适用 | macOS 发布方式，且已与 README、PRD 所述的签名公证 DMG 矛盾（§6） | —（macOS 发布方式） |
+| X-06 | “Releases are ad-hoc zips … do not re-propose”（`AGENTS.md:1051-1052`） | 不采用 | 经评估后不适用 | macOS 发布方式，且已与 README、PRD 所述的签名公证 DMG 矛盾（§6） | —（macOS 发布方式） |
 | X-07 | 引擎数据从应用包里解析，回退到检出目录时可能读到过期数据（trap 14） | 同类风险：宿主按 `SPEKTRALAB_HOST_DIR`、随包目录、检出目录的顺序寻找；PR 中写明测的是哪一份 | 调整后适用 | 解析顺序不同，风险相同 | `desktop/src-tauri/src/host.rs`、`engine/tests/resource_paths.cpp` |
 
 <!-- audit-counts: total=110 full=60 adjusted=42 na=8 -->
@@ -254,42 +254,45 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 
 审计中发现、本次**没有修改**的问题。它们涉及产品代码或别人负责的文档，按流程应由负责人在各自的提交中处理；规范同步规则（`sync:*`）只检查今后的改动，不会因下列历史偏差让 CI 变红。
 
+初版对照 `1e727cd`。每条开头标出在基线 `4297621` 的状态（对照 `git diff 1e727cd 4297621`，行号以 `4297621` 为准）：**未变**、**有变化**、**部分解决**、**已解决**、**新增**；已解决的写明由哪个提交解决，条目不删。
+
 **规范与代码不同步**
 
-1. 以下 `params_delta` 字段在 `engine/src/core/params.cpp` 的 `kFields` 中存在，但字段名在 `API-SPEC-callable-render-service.md` 中没有出现：`glare_amount`、`grain_amount`、`strip_budget_bytes`、`extended_dynamic_range`、`digital_intermediate`；`auto_exposure_method` 只记在 `CONTRACT-frontend-backend.md` §6。
-2. C ABI 只在 `engine/include/spektrafilm/spk_engine.h` 的注释里有完整记录：声明的 29 个 `spk_*` 函数中 API-SPEC 点名 12 个，其余 17 个（包括 `spk_render`、`spk_solve`、`spk_cancel`）在 API-SPEC、CONTRACT、ARCHITECTURE 里都没有出现。上游没有要求 C ABI 写进 API-SPEC 的规则，这一条只是记录，供负责人判断是否需要一份 C ABI 目录。
-3. `no_film` 与 `hello.frame_options` 写进了 `API-SPEC-callable-render-service.md` §19（宿主侧提交 `445e314`），但 `desktop/HOST-PROTOCOL.md` 没有记录（宿主的 `frame_options` 广播见 `engine/host/main.cpp:443-444`，前端侧提交 `f40ff32`）；`desktop/PROTOCOL-REQUESTS.md:76` 的 R4 仍标记 `[open]`。
-4. API-SPEC 的小节编号在两个分支间不同（CineStill 在 `main` 是 §16，在 `Windows_Linux` 是 §18），代码注释按 Windows_Linux 的编号引用。
-5. 前端从不检查 `hello.protocol`（`desktop/src/shared/protocol.ts:84` 只有类型），宿主协议若有破坏性变更，只会表现为方法缺失或数据错误。
+1. **未变**（`1e727cd..4297621` 没有改 `params.cpp` 与 `CONTRACT-frontend-backend.md`，API-SPEC 只在 §19 末尾加 4 行）。以下 `params_delta` 字段在 `engine/src/core/params.cpp` 的 `kFields` 中存在，但字段名在 `API-SPEC-callable-render-service.md` 中没有出现：`glare_amount`、`grain_amount`、`strip_budget_bytes`、`extended_dynamic_range`、`digital_intermediate`；`auto_exposure_method` 只记在 `CONTRACT-frontend-backend.md` §6。
+2. **未变**（`spk_engine.h` 未改）。C ABI 只在 `engine/include/spektrafilm/spk_engine.h` 的注释里有完整记录：声明的 29 个 `spk_*` 函数中，API-SPEC 点名 7 个，加上 CONTRACT 与 ARCHITECTURE 合计 12 个；其余 17 个（包括 `spk_render`、`spk_solve`、`spk_cancel`）在这三份文档里都没有出现（初版写作“API-SPEC 点名 12 个”，重核时更正）。上游没有要求 C ABI 写进 API-SPEC 的规则，这一条只是记录，供负责人判断是否需要一份 C ABI 目录。
+3. **部分解决**（`ec59666`、合并 `4297621`）。初版：`no_film` 与 `hello.frame_options` 写进了 `API-SPEC-callable-render-service.md` §19（宿主侧提交 `445e314`），但 `desktop/HOST-PROTOCOL.md` 没有记录（前端侧提交 `f40ff32`）。`4297621`：`desktop/HOST-PROTOCOL.md:177-203` 新增“Per-frame film bypass”一节（`ec59666`），记录 `render_view`、`export_frame`、`render_proof` 的 `no_film` 与 `hello.view_options`（`"no_film"`）；`hello.frame_options`（`"no-film"`）一行（`desktop/HOST-PROTOCOL.md:179`）由合并 `4297621` 加入；宿主的广播见 `engine/host/main.cpp:437-440`。仍未解决：`desktop/PROTOCOL-REQUESTS.md:76` 的 R4 仍标记 `[open]`。另：`desktop/HOST-PROTOCOL.md:196` 说 bypass 时其余 `params` 仍被校验并应用，宿主只在 `render_view` 这样做（`engine/host/main.cpp:971`），`export_frame` / `render_proof` 在 bypass 时不应用（`engine/host/main.cpp:1333`，与 `API-SPEC-callable-render-service.md:1166` 一致）。
+4. **未变**。API-SPEC 的小节编号在两个分支间不同（CineStill 在 `main` 是 §16，在 `Windows_Linux` 是 §18，`API-SPEC-callable-render-service.md:1110`），代码注释按 Windows_Linux 的编号引用。
+5. **未变**。前端从不检查 `hello.protocol`（`desktop/src/shared/protocol.ts:84` 只有类型；`ec59666` 新增的是能力探测 `hello.view_options`，`desktop/src/windows/Dialogs.tsx:151`），宿主协议若有破坏性变更，只会表现为方法缺失或数据错误。
 
 **文档自相矛盾或过时**
 
-6. `engine/PORT_PLAN.md:3-9`、`engine/PORT_COVERAGE.md`、`engine/WINDOWS_FEATURE_COVERAGE.md` 仍说五项功能被拒绝；`engine/WINDOWS_FULL_MIGRATION_PLAN.md` §8 与代码（`engine/src/pipeline/engine.cpp:355-360` 只拒绝 `contrast_mask`）表明只剩对比度蒙版。mock 宿主仍拒绝 `overscan` 与 `date_imprint`（`desktop/mock-host/core.ts:116-120`），因此基于 mock 的测试看到的片边与日期是禁用状态。
-7. `engine/WINDOWS.md:169` 写“34 registered kernels”，`engine/CMakeLists.txt:136-150` 列出 48 个。
-8. `README.md:130-131`、`README.zh-CN.md:90` 仍把 Qt Quick 前端介绍为 Windows 编辑器；现行编辑器是 `desktop/`（`engine/WINDOWS.md:78`）。`engine/WINDOWS.md:79` 链接的 `desktop/README.md` 不存在。
-9. `desktop/PARITY.md` 约七行已过时（镜头校正、磁盘缓存、移动文件识别、软打样、显示配置、被拒绝的功能等），`engine/WINDOWS_FULL_MIGRATION_PLAN.md:18` 也承认。
-10. `AGENTS.md:1032-1033` 说发布是 ad-hoc zip、不用 Developer ID；`README.md` 与 `PRD-v1.4.0.md` §1.1 说自 1.3.3 起是签名并公证的 DMG。`AGENTS.md:62-68` 与 `AGENTS.md:1048-1050` 关于谁能改规范文档的说法相反（见 P-10）。
-11. `CITATION.cff` 的版本为 0.3，描述只有 macOS。
-12. 多份验证记录引用本机路径 `D:/SpektraLab-win/...`（`engine/WINDOWS_FULL_MIGRATION_PLAN.md`、`engine/WINDOWS_MIGRATION_VALIDATION_20261018.md`、`engine/WINDOWS_WIDE_GAMUT.md`、`desktop/NOTES.md`），证据不在仓库，协作者无法复现。
+6. **未变**（这三份文档与 `engine.cpp` 的这几行未改；`desktop/PARITY.md` 已改，见第 9 条）。`engine/PORT_PLAN.md:3-9`、`engine/PORT_COVERAGE.md`、`engine/WINDOWS_FEATURE_COVERAGE.md` 仍说五项功能被拒绝；`engine/WINDOWS_FULL_MIGRATION_PLAN.md` §8 与代码（`engine/src/pipeline/engine.cpp:355-360` 只拒绝 `contrast_mask`）表明只剩对比度蒙版。mock 宿主仍拒绝 `overscan` 与 `date_imprint`（`desktop/mock-host/core.ts:117-121`，`realisticUnsupported` 默认开启，`core.ts:175`、`:217`），因此基于 mock 的测试看到的片边与日期是禁用状态。
+7. **有变化，未解决**。`engine/WINDOWS.md:169` 仍写“34 registered kernels”；`engine/CMakeLists.txt:136-150` 在 `1e727cd` 列出 48 个，在 `4297621` 是 49 个（`ec59666` 加 `spk_view_grade_float`）。
+8. **未变，范围扩大**（`aed5fd9`）。`README.md:147-148`、`README.zh-CN.md:103` 仍把 Qt Quick 前端介绍为 Windows 编辑器，`aed5fd9` 又在两份 README 开头重复了这一说法（`README.md:18-19`、`README.zh-CN.md:15`）；现行编辑器是 `desktop/`（`engine/WINDOWS.md:78`）。`engine/WINDOWS.md:79` 链接的 `desktop/README.md` 仍不存在。
+9. **已解决**（`ec59666` 重写，合并 `4297621` 再改开头一段）。初版：`desktop/PARITY.md` 约七行已过时（镜头校正、磁盘缓存、移动文件识别、软打样、显示配置、被拒绝的功能等），`engine/WINDOWS_FULL_MIGRATION_PLAN.md:18` 也承认。`4297621`：被拒绝的功能（`desktop/PARITY.md:9-15`）、设置页（`:27`）、镜头校正（`:48`）、移动文件识别（`:54`）、磁盘缓存（`:55`）、软打样与显示配置（`:57`、`:62`）都已改写；新状态没有逐行与代码核对。`engine/WINDOWS_FULL_MIGRATION_PLAN.md:18` 未改，那句话现在是历史。
+10. **未变**。`AGENTS.md:1051-1052` 说发布是 ad-hoc zip、不用 Developer ID；`README.md:51-54` 说 DMG 经 Developer ID 签名并由 Apple 公证，`PRD-v1.4.0.md` §1.1 说自 1.3.3 起如此。`AGENTS.md:81-87` 与 `AGENTS.md:1067-1069` 关于谁能改规范文档的说法相反（见 P-10）。
+11. **未变**。`CITATION.cff` 的版本为 0.3（`CITATION.cff:30`），描述只有 macOS。
+12. **有变化，范围扩大**（`ec59666`、合并 `4297621`）。多份验证记录引用本机路径 `D:/SpektraLab-win/...`（`engine/WINDOWS_FULL_MIGRATION_PLAN.md`、`engine/WINDOWS_MIGRATION_VALIDATION_20261018.md`、`engine/WINDOWS_WIDE_GAMUT.md`、`desktop/NOTES.md`），证据不在仓库，协作者无法复现。`4297621` 新增的文档同样如此：`desktop/docs/PR23-INTEGRATION-20261029.md:28-59`（验证表引用的 `build/*.log` 与 `D:\SpektraLab-win\…`；`:28` 自述这些日志未入库）、`desktop/docs/WINDOWS-FILM-MIGRATION-PLAN-20261028.md:138`、`desktop/MACOS-MAIN-ALIGNMENT-CHECKLIST-20261028.md:26-29`（链接的 `desktop/build/*.log` 不在仓库）。
 
 **许可与商标**
 
-13. Windows 的 About 对话框显示 macOS 的 `README.txt`（其中写“native macOS application”），并把用不到的 metal-cpp 许可也一起打包（`desktop/scripts/copy-assets.mjs:16-19`、`desktop/src/windows/Dialogs.tsx:235-237`），宿主的第三方声明（LibRaw、Lensfun、GLib、编解码器）没有在界面上出现；npm 与 crate 依赖没有汇总声明。
-14. `desktop/package.json:10` 与 `desktop/src-tauri/tauri.conf.json:51` 的 `homepage` 是 `https://github.com/spektrafilm`，既不是本仓库也不是上游（andreavolpato/spektrafilm）；spektrafilm 许可的前言要求不要把 spektrafilm 名称用于产品品牌。
-15. `engine/stage-host.sh:10` 把 `license/SPEKTRAFILM_LICENSE.txt` 标为“spektrafilm (upstream engine), GPL-3.0”，该文件实际是配置与 LUT 的 CC BY-SA 4.0 许可。
-16. 胶片封面图是厂商包装（带 Kodak / Fujifilm 商标与外观），且 `kodak_portra_400.jpg` 与 `kodak_gold_200.jpg` 字节完全相同（`modern_UI/Spektrafilm/Spektrafilm/Resources/FilmCovers/`），Portra 400 显示的是 Gold 200 的盒子。
+13. **未变**（`Dialogs.tsx` 只改了第 151 行，`copy-assets.mjs` 未改）。Windows 的 About 对话框显示 macOS 的 `README.txt`（其中写“native macOS application”），并把用不到的 metal-cpp 许可也一起打包（`desktop/scripts/copy-assets.mjs:16-19`、`desktop/src/windows/Dialogs.tsx:235-237`），宿主的第三方声明（LibRaw、Lensfun、GLib、编解码器）没有在界面上出现；npm 与 crate 依赖没有汇总声明。
+14. **未变**。`desktop/package.json:10` 与 `desktop/src-tauri/tauri.conf.json:51` 的 `homepage` 是 `https://github.com/spektrafilm`，既不是本仓库也不是上游（andreavolpato/spektrafilm）；spektrafilm 许可的前言要求不要把 spektrafilm 名称用于产品品牌。
+15. **未变**。`engine/stage-host.sh:10` 把 `license/SPEKTRAFILM_LICENSE.txt` 标为“spektrafilm (upstream engine), GPL-3.0”，该文件实际是配置与 LUT 的 CC BY-SA 4.0 许可。
+16. **未变**（两个文件仍是同一 blob `2f0a2e1`）。胶片封面图是厂商包装（带 Kodak / Fujifilm 商标与外观），且 `kodak_portra_400.jpg` 与 `kodak_gold_200.jpg` 字节完全相同（`modern_UI/Spektrafilm/Spektrafilm/Resources/FilmCovers/`），Portra 400 显示的是 Gold 200 的盒子。
 
 **Windows 平台习惯的缺口**
 
-17. 胶片条没有 Shift-点击范围选择（`desktop/src/windows/Filmstrip.tsx`）。
-18. 精确式触控板的双指滑动被当作缩放，横向位移被忽略（`desktop/src/canvas/Canvas.tsx:479`）。
-19. 退出用 Ctrl+Q、设置用 Ctrl+,（`desktop/src/windows/menus.ts:81-83`），来自 macOS 习惯；命令行包装器装到 `%USERPROFILE%\.local\bin`（`desktop/src-tauri/src/agent_files.rs:55`）。
-20. 高 DPI（125% / 150%）、多显示器、广色域与 10 位显示链、非 NVIDIA GPU 尚未在真实硬件上验收（`engine/WINDOWS_FULL_MIGRATION_PLAN.md` §6）。
+17. **未变**（`Filmstrip.tsx` 未改）。胶片条没有 Shift-点击范围选择（`desktop/src/windows/Filmstrip.tsx`）。
+18. **未变**。精确式触控板的双指滑动被当作缩放，横向位移被忽略（`desktop/src/canvas/Canvas.tsx:472`，初版为第 479 行）。
+19. **未变**。退出用 Ctrl+Q、设置用 Ctrl+,（`desktop/src/windows/menus.ts:81-83`），来自 macOS 习惯；命令行包装器装到 `%USERPROFILE%\.local\bin`（`desktop/src-tauri/src/agent_files.rs:55`）。
+20. **未变**。高 DPI（125% / 150%）、多显示器、广色域与 10 位显示链、非 NVIDIA GPU 尚未在真实硬件上验收（`engine/WINDOWS_FULL_MIGRATION_PLAN.md` §6）。
 
 **构建、CI 与发布**
 
-21. Windows 安装包与可执行文件未签名（`desktop/docs/WINDOWS-INSTALLER.md:91`）；没有卸载与升级测试；`.deb` / AppImage 没有安装测试；产物只保留 14 天、不发布。
-22. 原生 Windows 构建依赖手工准备的 `..\deps`（cmake 3.25、glslang、Vulkan-Headers），没有对应的准备脚本；`engine/build-windows.ps1` 会到 MATLAB 安装目录里找 cmake。
-23. `engine/build-windows.ps1` 写出的 `toolchain.json` 不含 `engine/host/` 源码与 `spektralab-host.exe` 的哈希。
-24. 推送到 `Windows_Linux` 不会触发 macOS 编译（`build.yml` 只监听 `main`），在本分支修改共享引擎可能悄悄破坏 Mac 构建，直到开 PR 才发现。
-25. CI 静默安装后只检查应用、宿主与引擎资源是否装上（`.github/workflows/desktop.yml` 的 `package-windows`），不检查安装目录里的许可与第三方声明。
+21. **未变**。Windows 安装包与可执行文件未签名（`desktop/docs/WINDOWS-INSTALLER.md:91`）；没有卸载与升级测试；`.deb` / AppImage 没有安装测试；产物只保留 14 天（HEAD 的 `desktop.yml` 仍是 `retention-days: 14`）、不发布。
+22. **未变**。原生 Windows 构建依赖手工准备的 `..\deps`（cmake 3.25、glslang、Vulkan-Headers），没有对应的准备脚本；`engine/build-windows.ps1` 会到 MATLAB 安装目录里找 cmake。
+23. **未变**。`engine/build-windows.ps1` 写出的 `toolchain.json` 不含 `engine/host/` 源码与 `spektralab-host.exe` 的哈希。
+24. **有变化**（`aed5fd9`）。初版：推送到 `Windows_Linux` 不会触发 macOS 编译（`build.yml` 只监听 `main`），在本分支修改共享引擎可能悄悄破坏 Mac 构建，直到开 PR 才发现。`4297621`：`build.yml` 只剩 `workflow_dispatch`（`.github/workflows/build.yml:11-13`），本 fork 的任何推送或 PR 都不触发 macOS 编译，`windows2` 沿用；共享引擎的改动要等有人手动运行 `build.yml` 才知道是否破坏 Mac 构建。
+25. **未变**。CI 静默安装后只检查应用、宿主与引擎资源是否装上（HEAD 的 `.github/workflows/desktop.yml:324-344`，`package-windows`），不检查安装目录里的许可与第三方声明。
+26. **新增**（合并 `4297621`）。`1e727cd` 的 `engine/src/pipeline/engine.cpp` 有 16 处 `#if !defined(__APPLE__) || defined(SPK_VULKAN_BACKEND)`，`4297621` 全部是 `#ifndef __APPLE__`（取了 `ec59666` 一侧，如 `engine/src/pipeline/engine.cpp:62`、`:71`、`:354`）；其他源文件仍用 `SPK_VULKAN_BACKEND`（`git grep -c SPK_VULKAN_BACKEND 4297621 -- engine`）。`engine/CMakeLists.txt:14-18` 与 `engine/LINUX_WINDOWS.md:214-218` 说 Mac 上的 Vulkan 构建（`SPEKTRALAB_VULKAN_ON_APPLE=ON`）让每个源文件都走可移植路径，`engine.cpp` 现在不是。F-03、T-12、M-10 依赖的 Mac 上 Vulkan 对 Metal 对照可能受影响；没有 Mac，这一构建能否编译、结果是否改变都未验证。

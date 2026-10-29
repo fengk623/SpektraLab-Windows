@@ -19,14 +19,14 @@ tests:
 
 ## 2. 现状与动机（Context）
 
-基线：evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22 +0800），即上游 `1e727cd`（合并 PR #23）再加该 fork 的 5 个提交。下面的历史回放截至 `1e727cd`；那 5 个提交另作回放（§6.3）。
+基线：evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22 +0800），即上游 `1e727cd`（合并 PR #23）再加该 fork 的 5 个提交。下面的历史回放截至 `1e727cd`；那 5 个提交中的 3 个非合并提交另作回放（§6.3）。行号以 `4297621` 为准。
 
 - **上游有流程，但文档不入库。** 上游先写 PRD、RFC 再编码，代码注释大量引用 `RFC-014`、`RFC-018` 等；但 `.gitignore:329-330` 把 `/rfc/`、`/PRD/` 设为本机保存（2026-10-13 起），协作者看不到。Windows 侧的设计记录散落在 `engine/WINDOWS_*.md`、`desktop/NOTES.md` 等处，格式各异，没有索引和状态。
-- **“接口变更同一提交改规范”只靠自觉。** 规则见 `AGENTS.md:62-68`、`ARCHITECTURE.md:662-665`、`desktop/HOST-PROTOCOL.md:15-17`。按本 RFC 的规则回放 `Windows_Linux` 上提交时间在 2026-09-11 00:00（+0800）之后、截至 `1e727cd` 的 343 个非合并提交（§6.3）：
+- **“接口变更同一提交改规范”只靠自觉。** 规则见 `AGENTS.md:81-87`、`ARCHITECTURE.md:662-665`、`desktop/HOST-PROTOCOL.md:15-17`。按本 RFC 的规则回放 `Windows_Linux` 上提交时间在 2026-09-11 00:00（+0800）之后、截至 `1e727cd` 的 343 个非合并提交（§6.3）：
   - `kFields` 字段变化 20 次，其中 9 次没有在同一提交改 `API-SPEC-callable-render-service.md`；`glare_amount`、`grain_amount`、`strip_budget_bytes`、`extended_dynamic_range`、`digital_intermediate` 这些字段名在当前的 API-SPEC 里一次也没有出现；`auto_exposure_method` 只记在 `CONTRACT-frontend-backend.md` §6。
-  - C ABI 不在此列：上游没有“C ABI 变化须改 API-SPEC”的规则，`spk_engine.h` 的注释就是它的文档（`spk_engine.h` 声明的 29 个 `spk_*` 函数，API-SPEC 只点名 12 个）。本 RFC 因此不为它设同步规则（§7）。
-  - 宿主协议变化 9 次，4 次未同步。宿主方法集的 5 次变化都同步了；4 次未同步都是 `protocol.ts` 的改动，其中 3 次是前端类型追上协议文档里已有的字段，1 次是真遗漏：`no_film` 与 `hello.frame_options`（宿主侧 `445e314`、前端侧 `f40ff32`）写进了 API-SPEC §19，却没有写进 `desktop/HOST-PROTOCOL.md`。
-- **CI 的 Windows 覆盖有空洞。** `desktop.yml` 的前端检查（tsc、eslint、vitest、`cargo test`）只在 Ubuntu 上跑；Windows 只用于打包和静默安装。`engine/tests/test_*.py` 里只有 `test_*codec*.py` 两个文件进了 CI（`desktop.yml:108-109`），另外 4 个文件的单元测试（`test_windows_fixture.py` 等，Windows 工具本身）从未在 CI 上运行。在 `1e727cd` 上，推送到新分支不会触发 `desktop.yml`（它只监听 `main`、`Windows_Linux`、`claude/**`）；在 `4297621` 上，`aed5fd9` 把 `desktop.yml` 与 `build.yml` 都改成了只手动触发。
+  - C ABI 不在此列：上游没有“C ABI 变化须改 API-SPEC”的规则，`spk_engine.h` 的注释就是它的文档（`spk_engine.h` 声明的 29 个 `spk_*` 函数，API-SPEC 只点名 7 个，连同 CONTRACT、ARCHITECTURE 共 12 个）。本 RFC 因此不为它设同步规则（§7）。
+  - 宿主协议变化 9 次，4 次未同步。宿主方法集的 5 次变化都同步了；4 次未同步都是 `protocol.ts` 的改动，其中 3 次是前端类型追上协议文档里已有的字段，1 次是真遗漏：`no_film` 与 `hello.frame_options`（宿主侧 `445e314`、前端侧 `f40ff32`）写进了 API-SPEC §19，却没有写进 `desktop/HOST-PROTOCOL.md`。基线 fork 后来补上了：`ec59666` 加了 `no_film` 与 `hello.view_options`，合并 `4297621` 加了 `hello.frame_options`（`desktop/HOST-PROTOCOL.md:177-203`）。
+- **CI 的 Windows 覆盖有空洞。** `desktop.yml` 的前端检查（tsc、eslint、vitest、`cargo test`）只在 Ubuntu 上跑；Windows 只用于打包和静默安装。`engine/tests/test_*.py` 里只有 `test_*codec*.py` 两个文件进了 CI（`desktop.yml:106-107`），另外 4 个文件的单元测试（`test_windows_fixture.py` 等，Windows 工具本身）从未在 CI 上运行。在 `1e727cd` 上，推送到新分支不会触发 `desktop.yml`（它只监听 `main`、`Windows_Linux`、`claude/**`，`1e727cd` 的 `desktop.yml:25-29`）；在 `4297621` 上，`aed5fd9` 把 `desktop.yml` 与 `build.yml` 都改成了只手动触发（`desktop.yml:25-27`、`build.yml:11-13`）。
 - **用户要求（2026-10-28）**：规范开发流程，新功能写 PRD，模块写 RFC，加自动化测试，配置 CI；完成本地验证后推送到用户自己的 fork（`fengk623/SpektraLab-Windows`）的 `windows2`，经用户审核后由用户本人提 PR；不改动 `JamesQiu2005/SpektraLab` 的 `main`、`Windows_Linux` 与 `evanfan005-bit` 的分支。
 
 ## 3. 设计（Design）
@@ -46,7 +46,7 @@ tests:
 | `audit` | 参考基线（仓库 URL、`main` 与 `Windows_Linux` 的 40 位 SHA、检查日期；有 git 时确认 SHA 在历史中）；矩阵表头六列；行 ID 格式与唯一；单元格非空；“是否完全适用”只能是“完全适用 / 调整后适用 / 经评估后不适用”；后两者必须写理由；“对应代码/测试”里反引号中的路径必须存在；`audit-counts` 注释与矩阵实际计数一致 | AUD000–AUD011 |
 | `sync` | 对 `merge-base(base, head)..head`（`--worktree` 再加未提交与未跟踪文件）应用 `sync_rules.json`；提交信息 `Spec-Sync-Waiver: <规则>: <理由>` 可豁免；改了代码却没有 `Gate:` / `Test:` 等记录行的提交给出警告 | SYN001、SYN003、SYN010 |
 
-退出码：0 无错误；1 有错误；2 检查无法运行（没有 git、引用不存在、规则文件损坏）。**无法运行从不报告通过**——对应上游“跳过的检查不能看起来像通过”（`AGENTS.md:798-822`）。
+退出码：0 无错误；1 有错误；2 检查无法运行（没有 git、引用不存在、规则文件损坏）。**无法运行从不报告通过**——对应上游“跳过的检查不能看起来像通过”（`AGENTS.md:817-841`）。
 
 ### 3.3 规范同步规则的三种触发方式
 
@@ -80,7 +80,7 @@ tests:
 ## 5. 影响评估（Impact）
 
 - **内存、缓存、色彩管理、导出、诊断**：无影响。没有修改 `desktop/src`、`desktop/src-tauri`、`engine/src`、`engine/host` 的代码。
-- **性能（CI 时长）**：本地实测检查器 52 个测试 1.6 s（Linux，Python 3.13）；`docs audit` 对本仓库 < 1 s。`desktop-checks-windows` 与 Windows 上 `python-unit` 的时长要以 `windows_linux2` 首次 CI 运行为准，届时补进 §9。
+- **性能（CI 时长）**：本地实测检查器 52 个测试 1.6 s（Linux，Python 3.13）；`docs audit` 对本仓库 < 1 s。`desktop-checks-windows` 与 Windows 上 `python-unit` 的时长要以 `windows2` 上的 CI 运行为准，届时补进 §9（此前 `windows_linux2` 上的首次运行在 `engine/tests` 单元测试一步失败，原因是缺 Pillow，见提交 `14f312c`）。
 - **许可证**：检查器只用 Python 标准库；CI 安装的 numpy（BSD-3-Clause）只用于测试，不随产品分发。没有新增随包依赖。
 - **对协作者的影响**：PRD/RFC 只对新功能和新模块要求；豁免机制让非接口改动不被卡住；`Gate:` 缺失目前只警告。
 
@@ -104,7 +104,9 @@ tests:
 | `wire-schema-parity` | 19 | 17 | 2 |
 | `host-protocol` | 9 | 5 | 4 |
 
-对比只按文件触发：同一时期改过 `params.cpp` 的提交 22 个，改过 `main.cpp` 或 `protocol.ts` 的 12 个。`wire-schema` 未同步的 9 次里，5 个字段名到今天仍不在 API-SPEC（§2），是真实偏差。`host-protocol` 未同步的 4 次里只有 1 次是真遗漏，另 3 次是前端类型追上已有文档，需要豁免；这是按文件触发 `protocol.ts` 的代价，接受它，因为那 1 次遗漏正是增量变更（§3.3）。
+对比只按文件触发：同一时期改过 `params.cpp` 的提交 22 个，改过 `main.cpp` 或 `protocol.ts` 的 12 个。`wire-schema` 未同步的 9 次里，5 个字段名到 `4297621` 仍不在 API-SPEC（§2），是真实偏差。`host-protocol` 未同步的 4 次里只有 1 次是真遗漏，另 3 次是前端类型追上已有文档，需要豁免；这是按文件触发 `protocol.ts` 的代价，接受它，因为那 1 次遗漏正是增量变更（§3.3）。
+
+**基线 fork 的提交。** `1e727cd..4297621` 的 3 个非合并提交（`aed5fd9`、`bbf536d`、`ec59666`）按同样方式回放（对比各自父提交）：`wire-schema`、`wire-schema-parity` 都未触发；`host-protocol` 在 `ec59666` 触发（`protocol.ts`），同一提交改了 `desktop/HOST-PROTOCOL.md`，即上面那 1 次遗漏的补救。把窗口延到 `4297621`（346 个非合并提交），上表三行（触发 / 同步 / 未改）变为 20/11/9、19/17/2、10/6/4。整段 `1e727cd..4297621` 作为一个范围时，`host-protocol` 触发且已同步，`kFields` 没有变化；另有 `ci-gates-doc` 触发（`aed5fd9` 改了工作流），那时还没有流程文档，规则不适用于这段历史。可用 `python tools/process/check_process.py sync --base <提交>^ --head <提交>` 逐个复现触发数。
 
 ### 6.4 门禁
 
@@ -115,10 +117,10 @@ tests:
 
 - **git pre-commit 钩子**：不强制、每台机器要单独安装，Windows 上还涉及钩子的 shell。否决；检查器可以手动或在 CI 跑。
 - **只按文件触发**：实现最简单，但代码搬动、注释和无关修改也会触发；不同步时豁免会变成常态。否决，按 `keys` / `entries` 判断（`protocol.ts` 例外，见 §6.3）。
-- **为 C ABI（`spk_engine.h`）设同步规则，要求同一范围改 API-SPEC**：上游没有这条规则，C ABI 的文档是头文件本身；API-SPEC 只点名 29 个函数中的 12 个。强加它会让几乎每次头文件改动都要豁免。否决（2026-10-28 独立核查后撤下了第一版里的这条规则）。
+- **为 C ABI（`spk_engine.h`）设同步规则，要求同一范围改 API-SPEC**：上游没有这条规则，C ABI 的文档是头文件本身；API-SPEC 只点名 29 个函数中的 7 个。强加它会让几乎每次头文件改动都要豁免。否决（2026-10-28 独立核查后撤下了第一版里的这条规则）。
 - **用 PyYAML 或 markdownlint**：引入第三方依赖，Windows 协作者要先装包。否决，只用标准库。
 - **文档放进根目录 `rfc/`、`PRD/`**：会被上游 `.gitignore` 忽略。否决。
-- **把 `Gate:` 缺失直接判失败**：2026-10-01 00:00（+0800）以来 `Windows_Linux` 上 139 个改了代码的非合并提交中只有 52 个有 `Test` / `Gate` / `Verified` / `Measured` 开头的行，立刻强制会卡住所有协作者。先警告，见 §10。
+- **把 `Gate:` 缺失直接判失败**：2026-10-01 00:00（+0800）以来到 `1e727cd`，`Windows_Linux` 上 139 个改了代码的非合并提交中只有 52 个有 `Test` / `Gate` / `Verified` / `Measured` 开头的行；到 `4297621` 是 142 个中 52 个（基线 fork 的 3 个非合并提交都没有）。立刻强制会卡住所有协作者。先警告，见 §10。
 
 ## 8. 发布与迁移（Rollout）
 
@@ -143,5 +145,5 @@ tests:
 1. 什么时候把 `--strict-trailers` 打开，让缺少 `Gate:` 的代码提交判失败？（建议：团队适应两周后）
 2. Windows 安装包签名：继续不签名，还是购买代码签名证书 / 使用 Azure Trusted Signing？发布前要定。
 3. 是否需要带 GPU 的自托管 Windows 运行器，让 Vulkan 渲染、`host_hello.py --require-vulkan` 与性能测量进 CI？
-4. `build.yml`（macOS 编译）只在推送到 `main`、PR 和手动触发时运行；`Windows_Linux` 上修改共享引擎时，是否也要触发 macOS 编译？
+4. `build.yml`（macOS 编译）在上游只在推送到 `main`、PR 和手动触发时运行；基线 fork 在 `aed5fd9` 改为只手动触发（`build.yml:11-13`），`windows2` 沿用。`windows2` 上修改共享引擎时，是否要自动触发 macOS 编译？
 5. 上游所有者是否接受在 `Windows_Linux` 上入库 `docs/`？如果他希望保持“PRD/RFC 只在本机”，这些文档需要换个位置。
