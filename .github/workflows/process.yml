@@ -84,10 +84,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      # numpy is the only third-party import of the tested tools; pinned so a
-      # new release cannot change a result between two runs of one commit.
+      # numpy, and Pillow for the PNG endpoints of windows_render_matrix.py,
+      # are the tested tools' only third-party imports; pinned so a new
+      # release cannot change a result between two runs of one commit.
       - name: Test dependencies
-        run: python -m pip install numpy==2.3.4
+        run: python -m pip install numpy==2.3.4 pillow==11.3.0
 
       # unittest_annotate.py runs `unittest discover` and also turns each
       # failure into an annotation, readable on the run page and through the

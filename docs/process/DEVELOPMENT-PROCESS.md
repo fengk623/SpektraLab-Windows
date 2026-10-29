@@ -123,7 +123,7 @@
 | 工作流 / 任务 | 运行在 | 做什么 |
 |---|---|---|
 | `process.yml` / `process-gate` | ubuntu-24.04 | 检查器单元测试（`SPK_REQUIRE_GIT=1`：没有 git 判失败而不是跳过）；`docs` + `audit` 检查；`sync` 检查（PR：对比 PR 基准；推送到 `Windows_Linux`：对比推送前的提交；其他分支：对比 `origin/Windows_Linux`）；缺少 `Gate:` 行的代码提交列为警告 |
-| `process.yml` / `python-unit` | ubuntu-24.04、windows-latest | `engine/tests/test_*.py`（numpy 固定版本）与检查器测试，两个平台都跑；失败的用例由 `.github/scripts/unittest_annotate.py` 写成运行页上的注释 |
+| `process.yml` / `python-unit` | ubuntu-24.04、windows-latest | `engine/tests/test_*.py`（numpy、Pillow 固定版本）与检查器测试，两个平台都跑；失败的用例由 `.github/scripts/unittest_annotate.py` 写成运行页上的注释 |
 | `desktop.yml` / `engine-linux` | ubuntu-24.04 | 引擎 + 宿主构建，CTest 与 `host_smoke.py`（lavapipe） |
 | `desktop.yml` / `engine-windows-cross` | ubuntu-24.04 | MinGW 交叉编译 `spektralab-host.exe`、DLL 导入白名单、依赖脚本单元测试、wine 下 `host_smoke.py` |
 | `desktop.yml` / `desktop-checks` | ubuntu-24.04 | `npm run check`、`build:web`、`build:agent`、`cargo test --locked`、Playwright |
