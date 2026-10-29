@@ -89,10 +89,14 @@ jobs:
       - name: Test dependencies
         run: python -m pip install numpy==2.3.4
 
+      # unittest_annotate.py runs `unittest discover` and also turns each
+      # failure into an annotation, readable on the run page and through the
+      # check-runs API without the raw log.
       - name: engine/tests unit tests
-        run: python -m unittest discover -s engine/tests -p "test_*.py" -v
+        run: python .github/scripts/unittest_annotate.py -s engine/tests -p "test_*.py"
 
       - name: Checker unit tests
+        if: success() || failure()
         env:
           SPK_REQUIRE_GIT: '1'
-        run: python -m unittest discover -s tools/process/tests -v
+        run: python .github/scripts/unittest_annotate.py -s tools/process/tests
