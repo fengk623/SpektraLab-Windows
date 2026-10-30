@@ -1,12 +1,11 @@
 # PRD 索引
 
 新功能的需求文档。何时需要 PRD、状态含义与提交规则见 [开发流程](../process/DEVELOPMENT-PROCESS.md) §1–§2；新建时复制 [TEMPLATE.md](TEMPLATE.md)。
-编号 `PRD-Wnnn`，下一个可用编号：**PRD-W001**。本表的状态必须与文件 front matter 一致（`check_process.py docs` 会检查）。
+编号 `PRD-Wnnn`，下一个可用编号：**PRD-W002**。本表的状态必须与文件 front matter 一致（`check_process.py docs` 会检查）。
 
 | ID | 标题 | 状态 | 负责人 | 更新 |
 |---|---|---|---|---|
-
-目前还没有按新模板写的 PRD。
+| [PRD-W001](PRD-W001-capture-one-library-on-windows.md) | Windows 上读取 Capture One 图库：spklib 辅助程序的 Windows 版 | Review | fengk623 | 2026-10-28 |
 
 ## 等价文档（已有，不迁移）
 

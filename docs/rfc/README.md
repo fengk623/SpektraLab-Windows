@@ -1,11 +1,12 @@
 # RFC 索引
 
 模块与设计记录。何时需要 RFC、状态含义与提交规则见 [开发流程](../process/DEVELOPMENT-PROCESS.md) §1–§2；新建时复制 [TEMPLATE.md](TEMPLATE.md)。
-编号 `RFC-Wnnn`，下一个可用编号：**RFC-W002**。本表的状态必须与文件 front matter 一致（`check_process.py docs` 会检查）。
+编号 `RFC-Wnnn`，下一个可用编号：**RFC-W003**。本表的状态必须与文件 front matter 一致（`check_process.py docs` 会检查）。
 
 | ID | 标题 | 状态 | 负责人 | 更新 |
 |---|---|---|---|---|
 | [RFC-W001](RFC-W001-development-process-and-ci.md) | 开发流程与 CI 门禁：PRD/RFC 体系、规范同步检查、Windows 上的自动化测试 | Review | Sizhi | 2026-10-28 |
+| [RFC-W002](RFC-W002-spklib-windows.md) | spklib 辅助程序的 Windows 移植：平台层、Capture One for Windows 的路径、构建与验收 | Review | fengk623 | 2026-10-28 |
 
 ## 等价文档（已有，不迁移）
 

@@ -1,0 +1,105 @@
+# The library helper (spklib-host.exe) on a clean Windows runner: the vendored
+# patches applied to the spklib commit they were made on, built with the pinned
+# toolchain, its test suite run, and the release build compared byte for byte
+# with the binary in vendor/spklib/windows (RFC-W002 §6).
+#
+#   build-test   windows-latest: JamesQiu2005/spektralab_library @ BASE, `git am`
+#                vendor/spklib/windows/patches/*.patch, llvm-mingw 20261006
+#                (SHA-256 checked), SQLite 3.54.1 (SHA3-256 checked by fetch.py),
+#                build-windows.cmd test, then build-windows.cmd release, compared
+#                byte for byte with vendor/spklib/windows/spklib-host.exe once one
+#                is vendored, and uploaded as an artifact.
+#
+# What it cannot tell: anything about Capture One. There is no Capture One on a
+# hosted runner, so reading a real catalog and session is the manual acceptance
+# in docs/validation/ (RFC-W002 §6.2).
+
+name: spklib helper (Windows)
+
+on:
+  push:
+    branches: [windows2]
+    paths: ['vendor/spklib/**', '.github/workflows/spklib-windows.yml']
+  pull_request:
+    paths: ['vendor/spklib/**', '.github/workflows/spklib-windows.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: spklib-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: spklib build, tests, reproducible release (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          # BASE, SPKLIB_COMMIT, LLVM_MINGW_* come from the one file the vendored binary was built by.
+          cat vendor/spklib/windows/BUILD-INFO.env >> "$GITHUB_ENV"
+          cat vendor/spklib/windows/BUILD-INFO.env
+
+      - uses: actions/checkout@v4
+        with:
+          repository: JamesQiu2005/spektralab_library
+          ref: ${{ env.BASE }}
+          path: spklib
+          fetch-depth: 1
+
+      - name: Apply the Windows port (git am)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd spklib
+          git -c user.name=ci -c user.email=ci@invalid am ../vendor/spklib/windows/patches/*.patch
+          git log --oneline -6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: llvm-mingw (pinned, SHA-256 checked)
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "$env:LLVM_MINGW_NAME.zip"
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_TAG/$env:LLVM_MINGW_NAME.zip" -OutFile $zip
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:LLVM_MINGW_SHA256) { throw "llvm-mingw SHA-256 $h, expected $env:LLVM_MINGW_SHA256" }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          "LLVM_MINGW=$env:RUNNER_TEMP\$env:LLVM_MINGW_NAME" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: SQLite (pinned, SHA3-256 checked)
+        run: python spklib/third_party/sqlite/fetch.py
+
+      - name: Build and test
+        shell: cmd
+        run: spklib\build-windows.cmd test
+
+      - name: Release build
+        shell: cmd
+        run: |
+          spklib\build-windows.cmd release || exit /b 1
+          type spklib\build\windows-x64\release\spklib-host.exe.sha256
+
+      # Once a binary is vendored, the release build must reproduce it byte for byte.
+      - name: The release build is the vendored binary
+        if: hashFiles('vendor/spklib/windows/spklib-host.exe') != ''
+        shell: cmd
+        run: |
+          fc /b spklib\build\windows-x64\release\spklib-host.exe vendor\spklib\windows\spklib-host.exe >nul || (echo the vendored spklib-host.exe is not what these sources and this toolchain build & exit /b 1)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spklib-host-windows-x64
+          path: |
+            spklib/build/windows-x64/release/spklib-host.exe
+            spklib/build/windows-x64/release/spklib-host.exe.sha256
+          if-no-files-found: error

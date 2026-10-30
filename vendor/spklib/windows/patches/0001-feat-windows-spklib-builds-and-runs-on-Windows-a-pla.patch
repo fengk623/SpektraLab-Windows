@@ -1,0 +1,2498 @@
+From 3fa3f7e2dc3eeeeab2c222dbf48c3a987f374567 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 23:28:32 -0500
+Subject: [PATCH 1/3] feat(windows): spklib builds and runs on Windows -- a
+ platform layer, Windows paths and Capture One for Windows' roots
+
+What differs between macOS, Linux and Windows now lives in src/platform.hpp:
+file times (st_mtimespec / st_mtim / GetFileAttributesExW), gmtime/localtime/
+timegm, a rename that never replaces (renamex_np RENAME_EXCL / MoveFileExW
+without REPLACE_EXISTING), Unicode NFC (CoreFoundation / NormalizeString),
+and how a path is spelled. On macOS and Linux nothing changes: path_string is
+path::string() and every helper keeps the old arithmetic for a "/" root.
+
+Windows:
+- Paths are kept and returned with '/' separators ("C:/Users/me/A.NEF",
+  "//server/share/..."), which every API spklib calls accepts. join_path,
+  is_prefix_dir, ensure_location and resolve know a root can be "C:/".
+- Capture One for Windows writes ZWINROOT "C:\" and ZMACROOT '', with '\'
+  in ZRELATIVEPATH (read from a catalog Capture One 16.6.4 for Windows made
+  for this). c1::platform_root picks ZWINROOT on Windows (ZMACROOT when
+  there is none, as in a catalog made on a Mac) and the relative path's
+  separators are converted; off Windows ZMACROOT is the root, as before.
+- The read-only snapshot opens file:///C:/... (and file:////server/...).
+- The snapshot copy reads with CreateFileW sharing read/write/delete, and
+  writes the SQLite lock-byte page (1 GiB) as zeros instead of reading it:
+  SQLite never uses that page, and while Capture One holds a write lock a
+  read of it fails (Windows locks are mandatory). A copy shorter than the
+  catalog is now a retry on every platform, not a quick_check failure.
+- The host puts stdin/stdout in binary mode: replies end in "\n".
+- spklib_create refuses to start unless the active code page is UTF-8
+  (the manifest the Windows build embeds), rather than mangle a non-ASCII
+  path in a narrow-string API.
+
+Tests: census() and the fixture's ZPATHLOCATION rows are portable (Windows
+rows as Capture One for Windows writes them); paths are compared in
+spklib's spelling; the real-catalog oracle resolves ZWINROOT on Windows and
+copies the database with plain reads (CopyFile cannot open a file Capture
+One has open for writing). New: path helpers, platform_root/resolve for both
+platforms, the lock-byte page copy (on Windows under a real LockFileEx),
+rename-no-replace, and a catalog in a non-ASCII folder. The NFC lookup test
+and the rename test say "skipped" on Linux, where NFC is the identity and
+rename(2) replaces.
+
+Gate: Linux (g++ 13, system SQLite 3.45.1): spklib-tests -- 521 passed, 0
+failed. Not yet built on Windows in this commit.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ host/main.cpp       |  12 +
+ src/api.cpp         |  13 +-
+ src/capture_one.cpp | 142 ++++++++++--
+ src/capture_one.hpp |  20 +-
+ src/library.cpp     | 172 ++++++--------
+ src/platform.cpp    | 239 +++++++++++++++++++
+ src/platform.hpp    |  79 +++++++
+ src/sqlite.cpp      |  10 +
+ tests/tests.cpp     | 550 ++++++++++++++++++++++++++++++--------------
+ 9 files changed, 937 insertions(+), 300 deletions(-)
+ create mode 100644 src/platform.cpp
+ create mode 100644 src/platform.hpp
+
+diff --git a/host/main.cpp b/host/main.cpp
+index 64c31f2..52d0690 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -13,6 +13,12 @@
+ #include <cstring>
+ #include <iostream>
+ #include <string>
++#include <vector>
++
++#ifdef _WIN32
++#include <fcntl.h>
++#include <io.h>
++#endif
+ 
+ #include "json.hpp"
+ #include "spklib/spklib.h"
+@@ -38,6 +44,12 @@ int one_shot(spklib_context* ctx, const char* method, const char* params) {
+ }  // namespace
+ 
+ int main(int argc, char** argv) {
++#ifdef _WIN32
++    // The pipes carry bytes: a reply ends in "\n", never "\r\n". argv is
++    // UTF-8 because the manifest (spklib.manifest) makes it the code page.
++    _setmode(_fileno(stdin), _O_BINARY);
++    _setmode(_fileno(stdout), _O_BINARY);
++#endif
+     std::string store;
+     std::vector<const char*> args;
+     for (int i = 1; i < argc; ++i) {
+diff --git a/src/api.cpp b/src/api.cpp
+index 6afba98..97fed45 100644
+--- a/src/api.cpp
++++ b/src/api.cpp
+@@ -5,6 +5,7 @@
+ #include <functional>
+ 
+ #include "capture_one.hpp"
++#include "platform.hpp"
+ #include "spklib/spklib.h"
+ 
+ namespace fs = std::filesystem;
+@@ -121,7 +122,7 @@ Json Context::call(const std::string& method, const Json& params_in) {
+         std::string path = params.value("path", std::string());
+         if (path.empty()) throw ApiError("invalid_params", "'path' is required");
+         try {
+-            return c1::probe(path, (fs::temp_directory_path() / ("spklib-probe-" + new_uuid())).string());
++            return c1::probe(path, platform::path_string(fs::temp_directory_path() / ("spklib-probe-" + new_uuid())));
+         } catch (const c1::SourceBusy& e) {
+             throw ApiError("source_busy", e.what());
+         } catch (const ApiError&) {
+@@ -147,14 +148,14 @@ Json Context::call(const std::string& method, const Json& params_in) {
+             if (store_.empty()) throw ApiError("invalid_params", "give 'path', or create the context with a 'store'");
+             Json pr;
+             try {
+-                pr = c1::probe(source, (fs::temp_directory_path() / ("spklib-probe-" + new_uuid())).string());
++                pr = c1::probe(source, platform::path_string(fs::temp_directory_path() / ("spklib-probe-" + new_uuid())));
+             } catch (const c1::SourceBusy& e) {
+                 throw ApiError("source_busy", e.what());
+             } catch (const std::exception& e) {
+                 throw ApiError("not_found", e.what());
+             }
+             if (!pr.value("supported", false)) throw ApiError("unsupported", pr.value("reason", std::string("unsupported catalog")));
+-            path = (fs::path(store_) / "Linked" / (pr["document_uuid"].get<std::string>() + ".spkcatalog")).string();
++            path = platform::path_string(fs::path(store_) / "Linked" / (pr["document_uuid"].get<std::string>() + ".spkcatalog"));
+         }
+         std::error_code ec;
+         std::unique_ptr<Library> lib;
+@@ -294,6 +295,12 @@ extern "C" {
+ spklib_context* spklib_create(const char* options_json, char** out_error) {
+     try {
+         spklib::Json o = options_json && *options_json ? spklib::Json::parse(options_json) : spklib::Json::object();
++        // Windows: every narrow path API spklib uses follows the active code
++        // page. Unless it is UTF-8 a non-ASCII path would be mangled, so say
++        // so now instead (platform.hpp).
++        if (!spklib::platform::utf8_code_page())
++            throw std::runtime_error("spklib needs the UTF-8 active code page on Windows: embed the activeCodePage manifest "
++                                     "(host/spklib.manifest) in the program");
+         return new spklib_context(o);
+     } catch (const std::exception& e) {
+         if (out_error) *out_error = dup(e.what());
+diff --git a/src/capture_one.cpp b/src/capture_one.cpp
+index b28e871..c66ce68 100644
+--- a/src/capture_one.cpp
++++ b/src/capture_one.cpp
+@@ -1,7 +1,5 @@
+ #include "capture_one.hpp"
+ 
+-#include <sys/stat.h>
+-
+ #include <cctype>
+ #include <chrono>
+ #include <cstdio>
+@@ -11,8 +9,19 @@
+ #include <set>
+ #include <thread>
+ 
++#include "platform.hpp"
+ #include "sqlite.hpp"
+ 
++#ifdef _WIN32
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#endif
++
+ namespace fs = std::filesystem;
+ 
+ namespace spklib::c1 {
+@@ -36,14 +45,14 @@ Located locate(const std::string& path) {
+     fs::path p(path);
+     std::error_code ec;
+     if (fs::is_regular_file(p, ec) && (p.extension() == ".cocatalogdb" || p.extension() == ".cosessiondb")) {
+-        return {p.parent_path().string(), p.string()};
++        return {platform::path_string(p.parent_path()), platform::path_string(p)};
+     }
+     if (!fs::is_directory(p, ec)) throw std::runtime_error("not a Capture One catalog: " + path);
+     // `<Name>.cocatalog/<Name>.cocatalogdb` is the layout Capture One writes;
+     // a renamed package keeps the old inner name, so fall back to the one
+     // database in the folder. `.backup` and the journals are not databases.
+     fs::path expected = p / (p.stem().string() + ".cocatalogdb");
+-    if (fs::is_regular_file(expected, ec)) return {p.string(), expected.string()};
++    if (fs::is_regular_file(expected, ec)) return {platform::path_string(p), platform::path_string(expected)};
+     std::vector<fs::path> found;
+     // A session folder holds `<Name>.cosessiondb` the same way
+     // (docs/SESSION-DESIGN.md §2): probe reads it; linking one waits until
+@@ -52,17 +61,17 @@ Located locate(const std::string& path) {
+         auto x = e.path().extension();
+         if (e.is_regular_file() && (x == ".cocatalogdb" || x == ".cosessiondb")) found.push_back(e.path());
+     }
+-    if (found.size() == 1) return {p.string(), found[0].string()};
++    if (found.size() == 1) return {platform::path_string(p), platform::path_string(found[0])};
+     throw std::runtime_error(found.empty() ? "no .cocatalogdb in " + path
+                                            : "more than one .cocatalogdb in " + path);
+ }
+ 
+ Fingerprint fingerprint(const std::string& database) {
+-    struct stat st {};
+-    if (::stat(database.c_str(), &st) != 0) throw std::runtime_error("cannot stat " + database);
++    platform::FileStat st;
++    if (!platform::file_stat(database, &st)) throw std::runtime_error("cannot stat " + database);
+     Fingerprint f;
+-    f.size = st.st_size;
+-    f.mtime_ns = int64_t(st.st_mtimespec.tv_sec) * 1'000'000'000 + st.st_mtimespec.tv_nsec;
++    f.size = st.size;
++    f.mtime_ns = st.mtime_ns;
+     std::ifstream in(database, std::ios::binary);
+     unsigned char h[100] = {};
+     in.read(reinterpret_cast<char*>(h), sizeof h);
+@@ -80,24 +89,97 @@ bool nonempty_file(const fs::path& p) {
+ }
+ 
+ /// A plain read-and-write copy. Not `fs::copy_file`, whose platform paths may
+-/// try to clone or carry metadata; this opens the source O_RDONLY and nothing
+-/// else.
+-void copy_bytes(const fs::path& from, const fs::path& to) {
++/// try to clone or carry metadata; this opens the source read-only and nothing
++/// else. Returns the bytes written.
++int64_t copy_bytes(const fs::path& from, const fs::path& to) {
+     std::ifstream in(from, std::ios::binary);
+-    if (!in) throw std::runtime_error("cannot read " + from.string());
++    if (!in) throw std::runtime_error("cannot read " + platform::path_string(from));
+     std::ofstream out(to, std::ios::binary | std::ios::trunc);
+-    if (!out) throw std::runtime_error("cannot write " + to.string());
++    if (!out) throw std::runtime_error("cannot write " + platform::path_string(to));
+     std::vector<char> buf(1 << 20);
++    int64_t total = 0;
+     while (in) {
+         in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+         out.write(buf.data(), in.gcount());
++        total += in.gcount();
+     }
++    if (in.bad()) throw std::runtime_error("read error in " + platform::path_string(from));
+     out.flush();
+-    if (!out) throw std::runtime_error("short write to " + to.string());
++    if (!out) throw std::runtime_error("short write to " + platform::path_string(to));
++    return total;
+ }
+ 
+ }  // namespace
+ 
++namespace detail {
++
++int64_t copy_database_file(const std::string& from_s, const std::string& to_s, int64_t lock_byte_offset) {
++#ifdef _WIN32
++    // Windows locks are mandatory: while Capture One holds SQLite's RESERVED,
++    // PENDING or EXCLUSIVE lock, a ReadFile over those bytes fails with
++    // ERROR_LOCK_VIOLATION. They sit on the lock-byte page, the page that
++    // starts at 1 GiB, which SQLite never reads or writes. So that page is
++    // written as zeros and never read; every other byte is copied.
++    const fs::path from(from_s), to(to_s);
++    HANDLE h = CreateFileW(from.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                           nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
++    if (h == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot read " + from_s);
++    struct Closer { HANDLE h; ~Closer() { CloseHandle(h); } } closer{h};
++    LARGE_INTEGER size{};
++    if (!GetFileSizeEx(h, &size)) throw std::runtime_error("cannot size " + from_s);
++    std::ofstream out(to, std::ios::binary | std::ios::trunc);
++    if (!out) throw std::runtime_error("cannot write " + to_s);
++    std::vector<char> buf(1 << 20);
++    auto read_at = [&](int64_t off, DWORD want) -> DWORD {
++        OVERLAPPED ov{};
++        ov.Offset = DWORD(uint64_t(off) & 0xFFFFFFFFu);
++        ov.OffsetHigh = DWORD(uint64_t(off) >> 32);
++        DWORD got = 0;
++        if (!ReadFile(h, buf.data(), want, &got, &ov)) {
++            DWORD e = GetLastError();
++            if (e == ERROR_HANDLE_EOF) return 0;
++            throw std::runtime_error("cannot read " + from_s + " at " + std::to_string(off) + " (Windows error " +
++                                     std::to_string(e) + ")");
++        }
++        return got;
++    };
++    // The page size, from the header: bytes 16-17, big-endian, 1 meaning 65536.
++    int64_t page = 65536;
++    if (read_at(0, 100) == 100 && std::string(buf.data(), 16) == std::string("SQLite format 3\0", 16)) {
++        int64_t p = (int64_t(uint8_t(buf[16])) << 8) | uint8_t(buf[17]);
++        page = p == 1 ? 65536 : p >= 512 ? p : 65536;
++    }
++    int64_t lock_lo = -1, lock_hi = -1;
++    if (lock_byte_offset >= 0 && size.QuadPart > lock_byte_offset) {
++        lock_lo = lock_byte_offset;
++        lock_hi = std::min<int64_t>(lock_byte_offset + page, size.QuadPart);
++    }
++    int64_t off = 0;
++    for (;;) {
++        if (lock_lo >= 0 && off >= lock_lo && off < lock_hi) {
++            std::vector<char> zeros(size_t(lock_hi - off), '\0');
++            out.write(zeros.data(), std::streamsize(zeros.size()));
++            off = lock_hi;
++            continue;
++        }
++        int64_t want = int64_t(buf.size());
++        if (lock_lo >= 0 && off < lock_lo) want = std::min(want, lock_lo - off);
++        DWORD got = read_at(off, DWORD(want));
++        if (got == 0) break;
++        out.write(buf.data(), got);
++        off += got;
++    }
++    out.flush();
++    if (!out) throw std::runtime_error("short write to " + to_s);
++    return off;
++#else
++    (void)lock_byte_offset;
++    return copy_bytes(fs::path(from_s), fs::path(to_s));
++#endif
++}
++
++}  // namespace detail
++
+ Snapshot take_snapshot(const std::string& database, const std::string& dest_dir, int retries) {
+     fs::create_directories(dest_dir);
+     const fs::path db(database);
+@@ -115,7 +197,7 @@ Snapshot take_snapshot(const std::string& database, const std::string& dest_dir,
+         if (nonempty_file(journal)) { last_reason = "Capture One is writing to the catalog (hot journal)"; continue; }
+ 
+         Fingerprint before = fingerprint(database);
+-        copy_bytes(db, out);
++        int64_t copied = detail::copy_database_file(database, platform::path_string(out));
+         std::error_code ec;
+         fs::remove(out_wal, ec);
+         // WAL mode is not what Capture One uses, but if it ever does, the
+@@ -124,22 +206,22 @@ Snapshot take_snapshot(const std::string& database, const std::string& dest_dir,
+         bool had_wal = nonempty_file(wal);
+         if (had_wal) copy_bytes(wal, out_wal);
+         Fingerprint after = fingerprint(database);
+-        if (!(before == after) || nonempty_file(journal)) {
++        if (!(before == after) || nonempty_file(journal) || copied != before.size) {
+             last_reason = "the catalog changed while it was being copied";
+             continue;
+         }
+         if (had_wal) {
+-            Db w(out.string(), Db::Mode::ReadWrite);
++            Db w(platform::path_string(out), Db::Mode::ReadWrite);
+             w.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+             w.exec("PRAGMA journal_mode=DELETE");
+         }
+         {
+-            Db check(out.string(), Db::Mode::ReadOnlyImmutable);
++            Db check(platform::path_string(out), Db::Mode::ReadOnlyImmutable);
+             auto s = check.prepare("PRAGMA quick_check");
+             std::string verdict = s.step() ? s.text(0) : "no answer";
+             if (verdict != "ok") { last_reason = "the copy failed quick_check: " + verdict; continue; }
+         }
+-        return {out.string(), before, attempt};
++        return {platform::path_string(out), before, attempt};
+     }
+     throw SourceBusy(last_reason.empty() ? "could not snapshot the catalog" : last_reason);
+ }
+@@ -184,15 +266,26 @@ std::string collection_kind(const std::string& e) {
+     return it == m.end() ? "other" : it->second;
+ }
+ 
++std::string platform_root(const PathLocation& loc) {
++#ifdef _WIN32
++    if (loc.win_root.find_first_not_of(" \t") == std::string::npos) return loc.mac_root;
++    std::string r = platform::to_spklib_separators(loc.win_root);
++    if (r.size() == 2 && r[1] == ':') r += '/';
++    return r;
++#else
++    return loc.mac_root;
++#endif
++}
++
+ std::string resolve(const PathLocation& loc, const std::string& package) {
+     std::string rel = loc.relative_path;
+     while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+-    std::string base = loc.relative ? package : loc.mac_root;
++    std::string base = loc.relative ? package : loc.root;
+     // Volume roots keep their trailing spaces ("/Volumes/NIKON Z 8   "): they
+     // are part of the mount point's name. Only a trailing '/' is a separator.
+-    while (base.size() > 1 && base.back() == '/') base.pop_back();
++    base = platform::strip_trailing_separators(base);
+     if (rel.empty()) return base;
+-    return base == "/" ? "/" + rel : base + "/" + rel;
++    return !base.empty() && base.back() == '/' ? base + rel : base + "/" + rel;
+ }
+ 
+ namespace {
+@@ -283,9 +376,10 @@ Catalog read(const std::string& snapshot_path) {
+             l.pk = s.i64(0);
+             l.relative = s.i64(1) != 0;
+             l.mac_root = s.text(2);
+-            l.relative_path = s.text(3);
++            l.relative_path = platform::to_spklib_separators(s.text(3));
+             l.win_root = s.text(4);
+             l.volume = s.text(5);
++            l.root = platform_root(l);
+             cat.locations.push_back(std::move(l));
+         }
+     }
+diff --git a/src/capture_one.hpp b/src/capture_one.hpp
+index 293fad9..2483e0c 100644
+--- a/src/capture_one.hpp
++++ b/src/capture_one.hpp
+@@ -58,14 +58,31 @@ struct Snapshot {
+ struct SourceBusy : std::runtime_error { using std::runtime_error::runtime_error; };
+ Snapshot take_snapshot(const std::string& database, const std::string& dest_dir, int retries = 5);
+ 
++namespace detail {
++/// The copy `take_snapshot` makes, exposed for the tests. Returns the bytes
++/// written. On Windows the SQLite lock-byte page -- the page at
++/// `lock_byte_offset`, 1 GiB in every database -- is written as zeros and
++/// never read: SQLite does not use it, and while Capture One holds a write
++/// lock there a read of it fails. Elsewhere every byte is copied.
++int64_t copy_database_file(const std::string& from, const std::string& to, int64_t lock_byte_offset = 0x40000000);
++}  // namespace detail
++
+ // --- the model -------------------------------------------------------------------
+ 
+ struct PathLocation {
+     int64_t pk = 0;
+     bool relative = false;     ///< relative to the catalog package
+     std::string mac_root, relative_path, win_root, volume;
++    /// The root this platform resolves an absolute location with
++    /// (`platform_root`). Set by `read`.
++    std::string root;
+ };
+ 
++/// ZMACROOT on macOS and Linux, as before. On Windows ZWINROOT in spklib's
++/// spelling ('/' separators, "C:" -> "C:/"), or ZMACROOT when Capture One
++/// wrote no Windows root (a catalog made on a Mac).
++std::string platform_root(const PathLocation& loc);
++
+ struct Image {
+     int64_t pk = 0;
+     std::string uuid, file_name, display_name;
+@@ -142,7 +159,8 @@ Catalog read(const std::string& snapshot_path);
+ /// Map Capture One's collection entity to SpektraLab's kind.
+ std::string collection_kind(const std::string& entity);
+ 
+-/// Absolute path of a location's folder. `package` resolves relative ones.
++/// Absolute path of a location's folder: `root` + '/' + relative path, or
++/// `package` + '/' + relative path for a relative one.
+ std::string resolve(const PathLocation& loc, const std::string& package);
+ 
+ /// Everything `catalog.probe` reports: version, counts, the journal state and
+diff --git a/src/library.cpp b/src/library.cpp
+index 0d1c69e..c45f649 100644
+--- a/src/library.cpp
++++ b/src/library.cpp
+@@ -1,11 +1,5 @@
+ #include "library.hpp"
+ 
+-#include <fcntl.h>
+-#include <stdio.h>
+-#include <sys/file.h>
+-#include <sys/stat.h>
+-#include <unistd.h>
+-
+ #include <algorithm>
+ #include <cerrno>
+ #include <cstring>
+@@ -21,11 +15,8 @@
+ #include <unordered_map>
+ #include <variant>
+ 
+-#ifdef __APPLE__
+-#include <CoreFoundation/CoreFoundation.h>
+-#endif
+-
+ #include "capture_one.hpp"
++#include "platform.hpp"
+ 
+ namespace fs = std::filesystem;
+ 
+@@ -56,34 +47,13 @@ constexpr const char* kOriginC1 = "capture_one";
+ constexpr const char* kCatalogDb = "Library.spkdb";
+ 
+ /// Unicode NFC, so a path typed by the app and a path stored by Capture One
+-/// compare equal however each spelled "未命名文件夹" or "é". Identity off
+-/// Apple platforms for now (docs/DESIGN.md, open items).
+-std::string nfc(const std::string& s) {
+-#ifdef __APPLE__
+-    bool ascii = std::all_of(s.begin(), s.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
+-    if (ascii) return s;
+-    CFStringRef in = CFStringCreateWithBytes(nullptr, reinterpret_cast<const UInt8*>(s.data()), CFIndex(s.size()),
+-                                             kCFStringEncodingUTF8, false);
+-    if (!in) return s;
+-    CFMutableStringRef m = CFStringCreateMutableCopy(nullptr, 0, in);
+-    CFStringNormalize(m, kCFStringNormalizationFormC);
+-    CFIndex len = CFStringGetLength(m), used = 0;
+-    CFStringGetBytes(m, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false, nullptr, 0, &used);
+-    std::string out(size_t(used), '\0');
+-    CFStringGetBytes(m, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false,
+-                     reinterpret_cast<UInt8*>(out.data()), used, &used);
+-    CFRelease(m);
+-    CFRelease(in);
+-    return out;
+-#else
+-    return s;
+-#endif
+-}
++/// compare equal however each spelled "未命名文件夹" or "é" (platform.hpp).
++std::string nfc(const std::string& s) { return platform::nfc(s); }
+ 
+ std::string iso(double t, bool utc) {
+     time_t secs = static_cast<time_t>(std::floor(t));
+     std::tm tm{};
+-    gmtime_r(&secs, &tm);
++    platform::utc_tm(secs, &tm);
+     char buf[32];
+     std::strftime(buf, sizeof buf, utc ? "%Y-%m-%dT%H:%M:%SZ" : "%Y-%m-%dT%H:%M:%S", &tm);
+     return buf;
+@@ -101,7 +71,7 @@ std::optional<double> parse_local(const std::string& s) {
+     tm.tm_hour = h;
+     tm.tm_min = mi;
+     tm.tm_sec = 0;
+-    return double(timegm(&tm)) + sec;
++    return double(platform::utc_time(&tm)) + sec;
+ }
+ 
+ std::string lower_ext(const std::string& name) {
+@@ -127,15 +97,16 @@ std::string kind_for_extension(const std::string& name) {
+ std::string join_path(const std::string& base, const std::string& rel_in) {
+     std::string rel = rel_in;
+     while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+-    std::string b = base;
+-    while (b.size() > 1 && b.back() == '/') b.pop_back();
++    std::string b = platform::strip_trailing_separators(base);
+     if (rel.empty()) return b;
+-    return b == "/" ? "/" + rel : b + "/" + rel;
++    // A root ("/", or "C:/" on Windows) already ends in its separator.
++    return !b.empty() && b.back() == '/' ? b + rel : b + "/" + rel;
+ }
+ 
+ bool is_prefix_dir(const std::string& ancestor, const std::string& child) {
+     if (ancestor == child) return false;
+-    if (ancestor == "/") return child.size() > 1 && child[0] == '/';
++    if (!ancestor.empty() && ancestor.back() == '/')  // a root: "/", "C:/"
++        return child.size() > ancestor.size() && child.compare(0, ancestor.size(), ancestor) == 0;
+     return child.size() > ancestor.size() && child.compare(0, ancestor.size(), ancestor) == 0 &&
+            child[ancestor.size()] == '/';
+ }
+@@ -350,7 +321,7 @@ std::optional<double> parse_utc(const std::string& s) {
+     tm.tm_mday = d;
+     tm.tm_hour = h;
+     tm.tm_min = mi;
+-    double t = double(timegm(&tm)) + sec;
++    double t = double(platform::utc_time(&tm)) + sec;
+     std::string zone = s.substr(size_t(n));
+     if (zone.empty() || zone == "Z") return t;
+     int zh = 0, zm = 0;
+@@ -555,8 +526,8 @@ Library::Library(std::string path, std::string kind, Db db)
+ }
+ 
+ std::string Library::database_path(const std::string& path, const std::string& kind) {
+-    if (kind == "session") return (fs::path(path) / (fs::path(path).filename().string() + ".spksession")).string();
+-    return (fs::path(path) / kCatalogDb).string();
++    if (kind == "session") return platform::path_string(fs::path(path) / (fs::path(path).filename().string() + ".spksession"));
++    return platform::path_string(fs::path(path) / kCatalogDb);
+ }
+ 
+ std::unique_ptr<Library> Library::create(const std::string& path_in, const std::string& kind, const Json& options) {
+@@ -566,13 +537,13 @@ std::unique_ptr<Library> Library::create(const std::string& path_in, const std::
+     if (kind == "catalog" && p.extension() != ".spkcatalog") p += ".spkcatalog";
+     std::error_code ec;
+     if (fs::exists(p, ec)) {
+-        if (!fs::is_directory(p, ec)) throw ApiError("exists", "a file is in the way: " + p.string());
+-        if (fs::exists(database_path(p.string(), kind), ec)) throw ApiError("exists", "a library already exists at " + p.string());
++        if (!fs::is_directory(p, ec)) throw ApiError("exists", "a file is in the way: " + platform::path_string(p));
++        if (fs::exists(database_path(platform::path_string(p), kind), ec)) throw ApiError("exists", "a library already exists at " + platform::path_string(p));
+     }
+     fs::create_directories(p);
+-    std::string dbp = database_path(p.string(), kind);
++    std::string dbp = database_path(platform::path_string(p), kind);
+     Db db(dbp, Db::Mode::Create);
+-    std::unique_ptr<Library> lib(new Library(p.string(), kind, std::move(db)));
++    std::unique_ptr<Library> lib(new Library(platform::path_string(p), kind, std::move(db)));
+     {
+         Transaction t(lib->db_);
+         lib->db_.exec(kSchema);
+@@ -603,7 +574,7 @@ std::unique_ptr<Library> Library::create(const std::string& path_in, const std::
+                  {"capture", "Capture"}, {"selects", "Selects"}, {"output", "Output"}, {"trash", "Trash"}}) {
+             std::string name = names.is_object() && names.contains(role) && names[role].is_string() ? names[role].get<std::string>() : def;
+             fs::create_directories(p / name);
+-            int64_t loc = lib->ensure_location((p / name).string());
++            int64_t loc = lib->ensure_location(platform::path_string(p / name));
+             auto s = lib->db_.prepare("INSERT INTO session_folder(role, location_id) VALUES (?, ?)");
+             s.bind(1, role).bind(2, loc);
+             s.run();
+@@ -619,32 +590,32 @@ std::pair<std::string, std::string> Library::locate(const std::string& path_in)
+     if (p.filename().empty()) p = p.parent_path();
+     std::error_code ec;
+     if (fs::is_regular_file(p, ec)) p = p.parent_path();
+-    if (fs::is_regular_file(database_path(p.string(), "catalog"), ec)) return {p.string(), "catalog"};
+-    if (fs::is_regular_file(database_path(p.string(), "session"), ec)) return {p.string(), "session"};
++    if (fs::is_regular_file(database_path(platform::path_string(p), "catalog"), ec)) return {platform::path_string(p), "catalog"};
++    if (fs::is_regular_file(database_path(platform::path_string(p), "session"), ec)) return {platform::path_string(p), "session"};
+     // A session folder that was renamed keeps its old database name: the one
+     // .spksession inside is the session (SESSION-DESIGN.md §3.1).
+     std::vector<fs::path> found;
+     for (auto& e : fs::directory_iterator(p, ec))
+         if (e.path().extension() == ".spksession") found.push_back(e.path());
+     if (found.size() == 1) {
+-        fs::rename(found[0], database_path(p.string(), "session"), ec);
+-        if (!ec) return {p.string(), "session"};
++        fs::rename(found[0], database_path(platform::path_string(p), "session"), ec);
++        if (!ec) return {platform::path_string(p), "session"};
+     }
+-    if (found.size() > 1) throw ApiError("ambiguous", "more than one .spksession in " + p.string());
+-    throw ApiError("not_found", "no SpektraLab library at " + p.string());
++    if (found.size() > 1) throw ApiError("ambiguous", "more than one .spksession in " + platform::path_string(p));
++    throw ApiError("not_found", "no SpektraLab library at " + platform::path_string(p));
+ }
+ 
+ std::unique_ptr<Library> Library::open(const std::string& path_in) {
+     auto [dir, kind] = locate(path_in);
+     fs::path p(dir);
+-    Db db(database_path(p.string(), kind), Db::Mode::ReadWrite);
++    Db db(database_path(platform::path_string(p), kind), Db::Mode::ReadWrite);
+     // A session held by another SpektraLab answers BUSY to the very first
+     // statement; ask briefly and call it what it is.
+     if (kind == "session") sqlite3_busy_timeout(db.raw(), 250);
+     try {
+-        std::unique_ptr<Library> lib(new Library(p.string(), kind, std::move(db)));
++        std::unique_ptr<Library> lib(new Library(platform::path_string(p), kind, std::move(db)));
+         if (!lib->db_.has_table("meta") || lib->meta("format") != "spklib.library")
+-            throw ApiError("unsupported", "not a SpektraLab library: " + p.string());
++            throw ApiError("unsupported", "not a SpektraLab library: " + platform::path_string(p));
+         lib->migrate();
+         if (kind == "session") {
+             lib->lock_session();
+@@ -831,7 +802,7 @@ Json Library::sync(const Json& options) {
+     auto t0 = std::chrono::steady_clock::now();
+     std::string scratch = options.is_object() && options.contains("scratch") && options["scratch"].is_string()
+                               ? options["scratch"].get<std::string>()
+-                              : (fs::temp_directory_path() / ("spklib-snapshot-" + new_uuid())).string();
++                              : platform::path_string(fs::temp_directory_path() / ("spklib-snapshot-" + new_uuid()));
+     c1::Snapshot snap;
+     try {
+         snap = c1::take_snapshot(loc.database, scratch);
+@@ -872,7 +843,7 @@ Json Library::sync(const Json& options) {
+             Upserter up(db_, "path_location", {"base", "root", "path", "volume"}, {});
+             for (auto& l : cat.locations) {
+                 auto [id, st] = up.put(std::to_string(l.pk), new_uuid(),
+-                                       {v(std::string(l.relative ? "origin" : "absolute")), v(l.mac_root),
++                                       {v(std::string(l.relative ? "origin" : "absolute")), v(l.root),
+                                         v(l.relative_path), v(l.volume)});
+                 tl.note(st);
+                 loc_id[l.pk] = id;
+@@ -1452,8 +1423,7 @@ Json Library::images(const Json& params) {
+         j["origin"] = s.text(21);
+         if (s.text(22) != "present") j["origin_state"] = s.text(22);
+         if (check) {
+-            struct stat st {};
+-            j["exists"] = ::stat(j["path"].get<std::string>().c_str(), &st) == 0;
++            j["exists"] = platform::file_stat(j["path"].get<std::string>());
+         }
+         ids.push_back(s.i64(0));
+         index_of[s.i64(0)] = list.size();
+@@ -1543,7 +1513,7 @@ Json Library::lookup(const Json& params) {
+     Json out = Json::array();
+     for (auto& path : string_list(params, "paths")) {
+         fs::path p = fs::path(path).lexically_normal();
+-        std::string dir = nfc(p.parent_path().string()), name = p.filename().string();
++        std::string dir = nfc(platform::path_string(p.parent_path())), name = p.filename().string();
+         Json hit = nullptr;
+         auto it = locations_->by_dir.find(dir);
+         if (it != locations_->by_dir.end()) {
+@@ -1753,8 +1723,7 @@ Json Library::variant_create(const Json& params) {
+ }
+ 
+ int64_t Library::ensure_location(const std::string& dir_in) {
+-    std::string dir = fs::path(dir_in).lexically_normal().string();
+-    while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
++    std::string dir = platform::strip_trailing_separators(platform::path_string(fs::path(dir_in).lexically_normal()));
+     if (!locations_) build_location_cache();
+     auto it = locations_->by_dir.find(nfc(dir));
+     if (it != locations_->by_dir.end()) {
+@@ -1774,7 +1743,10 @@ int64_t Library::ensure_location(const std::string& dir_in) {
+         root = "";
+         rel = dir == path_ ? "" : dir.substr(path_.size() + 1);
+     } else {
+-        rel = dir.size() > 1 ? dir.substr(1) : "";
++        // "/" and the rest; on Windows also "C:/" or "//server/share/" and the rest.
++        size_t n = std::max<size_t>(platform::root_length(dir), 1);
++        if (n > 1) root = dir.substr(0, n);
++        rel = dir.size() > n ? dir.substr(n) : "";
+     }
+     auto ins = db_.prepare("INSERT INTO path_location(uuid, base, root, path) VALUES (?, ?, ?, ?)");
+     ins.bind(1, new_uuid()).bind(2, base).bind(3, root).bind(4, rel);
+@@ -1873,7 +1845,7 @@ Json Library::add_images(const Json& params) {
+             } else {
+                 time_t secs = time_t(now);
+                 std::tm tm{};
+-                localtime_r(&secs, &tm);
++                platform::local_tm(secs, &tm);
+                 char buf[16];
+                 std::strftime(buf, sizeof buf, "%Y/%m/%d", &tm);
+                 dir = fs::path(path_) / "Originals" / buf;
+@@ -1889,7 +1861,7 @@ Json Library::add_images(const Json& params) {
+                 continue;
+             }
+         }
+-        Json found = lookup({{"paths", Json::array({target.string()})}})["results"][0];
++        Json found = lookup({{"paths", Json::array({platform::path_string(target)})}})["results"][0];
+         if (found["found"].get<bool>() && found["match"]["origin_state"] == "present") {
+             r["image"] = found["match"]["image"];
+             r["variant"] = found["match"]["variant"];
+@@ -1897,7 +1869,7 @@ Json Library::add_images(const Json& params) {
+             results.push_back(r);
+             continue;
+         }
+-        int64_t loc = ensure_location(target.parent_path().string());
++        int64_t loc = ensure_location(platform::path_string(target.parent_path()));
+         ensure_folder(loc);
+         const Json meta_in = item.is_object() && item.contains("metadata") ? item["metadata"] : Json::object();
+         std::string uuid = new_uuid(), vuuid = new_uuid();
+@@ -1918,7 +1890,7 @@ Json Library::add_images(const Json& params) {
+         if (auto c = s_or_null("captured_local")) captured = parse_local(*c);
+         ins.bind(1, uuid).bind(2, loc).bind(3, target.filename().string()).bind(4, target.stem().string())
+             .bind(5, kind_for_extension(target.filename().string()))
+-            .bind(6, int64_t(mode == "copy" || is_prefix_dir(path_, target.string())))
++            .bind(6, int64_t(mode == "copy" || is_prefix_dir(path_, platform::path_string(target))))
+             .bind(7, i_or_null("width")).bind(8, i_or_null("height"))
+             .bind(9, int64_t(fs::file_size(target, ec))).bind(10, captured).bind(11, now)
+             .bind(12, s_or_null("camera_make")).bind(13, s_or_null("camera_model")).bind(14, s_or_null("lens"))
+@@ -1940,7 +1912,7 @@ Json Library::add_images(const Json& params) {
+         r["image"] = uuid;
+         r["variant"] = vuuid;
+         r["existing"] = false;
+-        if (mode == "copy") r["stored_at"] = target.string();
++        if (mode == "copy") r["stored_at"] = platform::path_string(target);
+         ++added;
+         results.push_back(r);
+     }
+@@ -2113,8 +2085,7 @@ Json Library::relink_location(const Json& params) {
+         // the same old prefix -- a renamed volume is found in one step. Only
+         // SpektraLab's own column moves; Capture One's root and path stay.
+         std::string old_dir = resolve_location(id);
+-        std::string new_dir = fs::path(need_string(params, "path")).lexically_normal().string();
+-        while (new_dir.size() > 1 && new_dir.back() == '/') new_dir.pop_back();
++        std::string new_dir = platform::strip_trailing_separators(platform::path_string(fs::path(need_string(params, "path")).lexically_normal()));
+         std::error_code ec;
+         if (!fs::is_directory(new_dir, ec)) throw ApiError("not_found", "no folder at " + new_dir);
+         std::string old_prefix = old_dir, new_prefix = new_dir;
+@@ -2123,8 +2094,8 @@ Json Library::relink_location(const Json& params) {
+             if (a.filename() != b.filename() || a.filename().empty() || !a.has_parent_path() || !b.has_parent_path() ||
+                 a.parent_path() == a || b.parent_path() == b)
+                 break;
+-            old_prefix = a.parent_path().string();
+-            new_prefix = b.parent_path().string();
++            old_prefix = platform::path_string(a.parent_path());
++            new_prefix = platform::path_string(b.parent_path());
+         }
+         bool all = params.value("all_matching", true);
+         auto q = db_.prepare("SELECT id, uuid FROM path_location WHERE base = 'absolute'");
+@@ -2230,7 +2201,7 @@ Json Library::session_scan(const Json& params) {
+         if (name.find(".spksession") != std::string::npos) continue;
+         std::string kind = kind_for_extension(name);
+         if (kind == "other" || skip_ext.count(lower_ext(name))) continue;
+-        found.push_back(p.string());
++        found.push_back(platform::path_string(p));
+     }
+     std::sort(found.begin(), found.end());
+     Json items = Json::array();
+@@ -2241,8 +2212,7 @@ Json Library::session_scan(const Json& params) {
+         if (!locations_) build_location_cache();
+         auto s = db_.prepare("SELECT location_id, file_name FROM image WHERE origin_state = 'present'");
+         while (s.step()) {
+-            struct stat st {};
+-            if (::stat(join_path(resolve_location(s.i64(0)), s.text(1)).c_str(), &st) != 0) ++missing;
++            if (!platform::file_stat(join_path(resolve_location(s.i64(0)), s.text(1)))) ++missing;
+         }
+     }
+     (void)params;
+@@ -2268,30 +2238,28 @@ Json Library::move_image(int64_t image_id, int64_t to_location, const std::strin
+     std::error_code ec;
+     for (int n = 1; suffix && fs::exists(target, ec); ++n)
+         target = fs::path(dir) / (fs::path(name).stem().string() + " (" + std::to_string(n) + ")" + fs::path(name).extension().string());
+-    if (fs::exists(target, ec)) return {{"from", from}, {"to", target.string()}, {"moved", false}, {"conflict", true}};
++    if (fs::exists(target, ec)) return {{"from", from}, {"to", platform::path_string(target)}, {"moved", false}, {"conflict", true}};
+     fs::create_directories(dir, ec);
+     int64_t intent;
+     {
+         auto s = db_.prepare("INSERT INTO fs_intent(op, image_id, from_path, to_path, to_location_id, at) VALUES (?, ?, ?, ?, ?, ?)");
+-        s.bind(1, op).bind(2, image_id).bind(3, from).bind(4, target.string()).bind(5, to_location).bind(6, now_unix());
++        s.bind(1, op).bind(2, image_id).bind(3, from).bind(4, platform::path_string(target)).bind(5, to_location).bind(6, now_unix());
+         s.run();
+         intent = db_.last_insert_id();
+     }
+-#ifdef __APPLE__
+-    // RENAME_EXCL: never replace a file that appeared since the check above.
+-    int rc = ::renamex_np(from.c_str(), target.c_str(), RENAME_EXCL);
+-#else
+-    int rc = ::rename(from.c_str(), target.c_str());
+-#endif
++    // Never replace a file that appeared since the check above (macOS
++    // RENAME_EXCL, Windows MoveFileExW without REPLACE_EXISTING).
++    std::string why;
++    int rc = platform::rename_no_replace(from, platform::path_string(target), &why);
+     if (rc != 0) {
+-        int e = errno;
++        int e = rc;
+         auto d = db_.prepare("DELETE FROM fs_intent WHERE id = ?");
+         d.bind(1, intent);
+         d.run();
+         if (e == EXDEV) throw ApiError("cross_volume", "the destination is on another disk");
+-        if (e == EEXIST) return {{"from", from}, {"to", target.string()}, {"moved", false}, {"conflict", true}};
++        if (e == EEXIST) return {{"from", from}, {"to", platform::path_string(target)}, {"moved", false}, {"conflict", true}};
+         if (e == ENOENT) throw ApiError("not_found", "the file is not where the library says: " + from);
+-        throw ApiError("io", std::string("rename failed: ") + std::strerror(e));
++        throw ApiError("io", "rename failed: " + why);
+     }
+     auto u = db_.prepare("UPDATE image SET previous_location_id = location_id, location_id = ?, file_name = ? WHERE id = ?");
+     u.bind(1, to_location).bind(2, target.filename().string()).bind(3, image_id);
+@@ -2299,7 +2267,7 @@ Json Library::move_image(int64_t image_id, int64_t to_location, const std::strin
+     auto d = db_.prepare("DELETE FROM fs_intent WHERE id = ?");
+     d.bind(1, intent);
+     d.run();
+-    return {{"from", from}, {"to", target.string()}, {"moved", true}};
++    return {{"from", from}, {"to", platform::path_string(target)}, {"moved", true}};
+ }
+ 
+ Json Library::session_move(const Json& params) {
+@@ -2310,7 +2278,7 @@ Json Library::session_move(const Json& params) {
+         // Not a role: a folder inside the session, relative to its root.
+         fs::path dir = fs::path(path_) / to;
+         if (to.find("..") != std::string::npos) throw ApiError("invalid_params", "'to' must stay inside the session");
+-        loc = ensure_location(dir.string());
++        loc = ensure_location(platform::path_string(dir));
+     }
+     bool suffix = params.value("on_conflict", std::string("fail")) == "suffix";
+     Json moved = Json::array(), conflicts = Json::array();
+@@ -2372,7 +2340,7 @@ Json Library::session_trash_commit(const Json& params) {
+         fs::path fp(p);
+         std::error_code ec;
+         // Only a file that really left the session's Trash folder loses its row.
+-        if (nfc(fp.parent_path().string()) != nfc(dir) || fs::exists(fp, ec)) { refused.push_back(p); continue; }
++        if (nfc(platform::path_string(fp.parent_path())) != nfc(dir) || fs::exists(fp, ec)) { refused.push_back(p); continue; }
+         auto s = db_.prepare("SELECT id FROM image WHERE location_id = ? AND file_name = ?");
+         s.bind(1, *trash).bind(2, fp.filename().string());
+         if (!s.step()) { refused.push_back(p); continue; }
+@@ -2562,7 +2530,7 @@ std::optional<int64_t> Library::new_recent_import(const std::vector<int64_t>& im
+     // spell `created_at` (UTC) in its own language instead.
+     time_t secs = time_t(now);
+     std::tm tm{};
+-    localtime_r(&secs, &tm);
++    platform::local_tm(secs, &tm);
+     char name[32];
+     std::strftime(name, sizeof name, "%Y-%m-%d %H:%M", &tm);
+     Transaction t(db_);
+@@ -2643,7 +2611,7 @@ Json Library::sync_tree(const std::string& root, bool recursive, const std::set<
+         }
+         if (!e.is_regular_file(ec2) || name.find(".spksession") != std::string::npos) return;
+         std::string k = kind_for_extension(name);
+-        if (k == "raw" || k == "raster") files.push_back(e.path().string());
++        if (k == "raw" || k == "raster") files.push_back(platform::path_string(e.path()));
+     };
+     if (recursive) {
+         for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec);
+@@ -2710,8 +2678,7 @@ Json Library::sync_tree(const std::string& root, bool recursive, const std::set<
+         for (auto& [path, i] : by_path) {
+             Known& k = known[i];
+             if (k.seen || k.state != "present") continue;
+-            struct stat st {};
+-            if (::stat(path.c_str(), &st) == 0) continue;
++            if (platform::file_stat(path)) continue;
+             vanished[{nfc(k.name), k.size.value_or(-1)}].push_back(i);
+         }
+         // Moved: a new file whose name and size are those of exactly one
+@@ -2726,7 +2693,7 @@ Json Library::sync_tree(const std::string& root, bool recursive, const std::set<
+             auto v = vanished.find({nfc(fp.filename().string()), size});
+             if (v == vanished.end() || v->second.size() != 1) { to_add.push_back(f); continue; }
+             Known& k = known[v->second[0]];
+-            int64_t loc = ensure_location(fp.parent_path().string());
++            int64_t loc = ensure_location(platform::path_string(fp.parent_path()));
+             ensure_folder(loc);
+             mv.bind(1, loc).bind(2, fp.filename().string()).bind(3, k.id);
+             mv.run();
+@@ -2785,14 +2752,13 @@ Json Library::sync_watched(int64_t watched_id, bool first) {
+ 
+ Json Library::folders_add(const Json& params) {
+     require_own_library();
+-    std::string path = fs::path(need_string(params, "path")).lexically_normal().string();
+-    while (path.size() > 1 && path.back() == '/') path.pop_back();
++    std::string path = platform::strip_trailing_separators(platform::path_string(fs::path(need_string(params, "path")).lexically_normal()));
+     std::error_code ec;
+     if (!fs::is_directory(path, ec)) throw ApiError("not_found", "no folder at " + path);
+     // A Capture One catalog is linked (capture_one.link), never walked as a
+     // folder: its Originals are Capture One's.
+     for (fs::path a(path); ; a = a.parent_path()) {
+-        if (is_library_package(a)) throw ApiError("invalid_params", "the folder is inside another library: " + a.string());
++        if (is_library_package(a)) throw ApiError("invalid_params", "the folder is inside another library: " + platform::path_string(a));
+         if (!a.has_parent_path() || a.parent_path() == a) break;
+     }
+     if (path == path_ || is_prefix_dir(path_, path))
+@@ -2939,7 +2905,7 @@ SourceRead read_source(const std::string& source) {
+     if (fs::path(r.loc.database).extension() == ".cosessiondb")
+         throw ApiError("unsupported", "copying a Capture One session waits for its schema to be verified (SESSION-DESIGN.md §6)");
+     auto t0 = std::chrono::steady_clock::now();
+-    std::string scratch = (fs::temp_directory_path() / ("spklib-snapshot-" + new_uuid())).string();
++    std::string scratch = platform::path_string(fs::temp_directory_path() / ("spklib-snapshot-" + new_uuid()));
+     std::error_code ec;
+     try {
+         r.snap = c1::take_snapshot(r.loc.database, scratch);
+@@ -3157,12 +3123,12 @@ Json Library::merge_capture_one(const c1::Catalog& cat, const std::string& packa
+         for (auto& l : cat.locations) {
+             const std::string key = std::to_string(l.pk);
+             seen.insert(key);
+-            Json theirs = {{"base", l.relative ? "origin" : "absolute"}, {"root", l.mac_root}, {"path", l.relative_path},
++            Json theirs = {{"base", l.relative ? "origin" : "absolute"}, {"root", l.root}, {"path", l.relative_path},
+                            {"volume", l.volume}};
+             auto k = known.find(key);
+             if (k == known.end()) {
+                 std::string u = new_uuid();
+-                ins.bind(1, u).bind(2, theirs["base"].get<std::string>()).bind(3, l.mac_root).bind(4, l.relative_path).bind(5, l.volume);
++                ins.bind(1, u).bind(2, theirs["base"].get<std::string>()).bind(3, l.root).bind(4, l.relative_path).bind(5, l.volume);
+                 ins.run();
+                 loc_id[key] = db_.last_insert_id();
+                 loc_key[db_.last_insert_id()] = key;
+@@ -3705,7 +3671,7 @@ std::unique_ptr<Library> Library::copy_capture_one(const std::string& source, co
+     if (p.filename().empty()) p = p.parent_path();
+     if (p.extension() != ".spkcatalog") p += ".spkcatalog";
+     std::error_code ec;
+-    if (fs::exists(p, ec) || fs::is_symlink(p, ec)) throw ApiError("exists", "something is already at " + p.string());
++    if (fs::exists(p, ec) || fs::is_symlink(p, ec)) throw ApiError("exists", "something is already at " + platform::path_string(p));
+     if (mirror && mirror->meta("origin_kind", "none") != "capture_one.catalog")
+         throw ApiError("invalid_params", "'mirror' must be a library capture_one.link made");
+ 
+@@ -3719,7 +3685,7 @@ std::unique_ptr<Library> Library::copy_capture_one(const std::string& source, co
+     Json o = Json::object();
+     o["name"] = options.is_object() && options.contains("name") && options["name"].is_string()
+                     ? options["name"].get<std::string>() : fs::path(src.loc.package).stem().string();
+-    std::unique_ptr<Library> lib = create(p.string(), "catalog", o);
++    std::unique_ptr<Library> lib = create(platform::path_string(p), "catalog", o);
+     try {
+         Transaction t(lib->db_);
+         const double now = now_unix();
+diff --git a/src/platform.cpp b/src/platform.cpp
+new file mode 100644
+index 0000000..4c12880
+--- /dev/null
++++ b/src/platform.cpp
+@@ -0,0 +1,239 @@
++#include "platform.hpp"
++
++#include <algorithm>
++#include <cctype>
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++
++#ifdef _WIN32
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#ifdef _MSC_VER
++#pragma comment(lib, "normaliz.lib")
++#endif
++#else
++#include <stdio.h>
++#include <sys/stat.h>
++#endif
++
++#ifdef __APPLE__
++#include <CoreFoundation/CoreFoundation.h>
++#endif
++
++namespace fs = std::filesystem;
++
++namespace spklib::platform {
++
++#ifdef _WIN32
++namespace {
++
++std::wstring widen(const std::string& s) {
++    if (s.empty()) return std::wstring();
++    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), nullptr, 0);
++    std::wstring w(size_t(n), L'\0');
++    MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), n);
++    return w;
++}
++
++std::string narrow(const wchar_t* w, int len) {
++    if (len <= 0) return std::string();
++    int n = WideCharToMultiByte(CP_UTF8, 0, w, len, nullptr, 0, nullptr, nullptr);
++    std::string s(size_t(n), '\0');
++    WideCharToMultiByte(CP_UTF8, 0, w, len, s.data(), n, nullptr, nullptr);
++    return s;
++}
++
++std::string last_error_message(DWORD e) {
++    wchar_t* buf = nullptr;
++    DWORD n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++                             nullptr, e, 0, reinterpret_cast<wchar_t*>(&buf), 0, nullptr);
++    std::string out = n ? narrow(buf, int(n)) : "error " + std::to_string(e);
++    if (buf) LocalFree(buf);
++    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
++    return out;
++}
++
++}  // namespace
++#endif
++
++// --- time --------------------------------------------------------------------------------
++
++// MinGW declares gmtime_s and localtime_s only with its "secure API" on; the
++// Windows CRT keeps gmtime's and localtime's result per thread, so the plain
++// calls are thread-safe there.
++void utc_tm(time_t t, std::tm* out) {
++#if defined(_MSC_VER)
++    gmtime_s(out, &t);
++#elif defined(_WIN32)
++    if (const std::tm* r = std::gmtime(&t)) *out = *r;
++#else
++    gmtime_r(&t, out);
++#endif
++}
++
++void local_tm(time_t t, std::tm* out) {
++#if defined(_MSC_VER)
++    localtime_s(out, &t);
++#elif defined(_WIN32)
++    if (const std::tm* r = std::localtime(&t)) *out = *r;
++#else
++    localtime_r(&t, out);
++#endif
++}
++
++time_t utc_time(std::tm* tm) {
++#ifdef _WIN32
++    return _mkgmtime(tm);
++#else
++    return timegm(tm);
++#endif
++}
++
++// --- files -------------------------------------------------------------------------------
++
++bool file_stat(const std::string& path, FileStat* out) {
++#ifdef _WIN32
++    WIN32_FILE_ATTRIBUTE_DATA a{};
++    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &a)) return false;
++    if (out) {
++        out->size = (int64_t(a.nFileSizeHigh) << 32) | int64_t(a.nFileSizeLow);
++        // FILETIME: 100 ns ticks since 1601-01-01 UTC.
++        int64_t ticks = (int64_t(a.ftLastWriteTime.dwHighDateTime) << 32) | int64_t(a.ftLastWriteTime.dwLowDateTime);
++        out->mtime_ns = (ticks - 116444736000000000LL) * 100;
++    }
++    return true;
++#else
++    struct stat st {};
++    if (::stat(path.c_str(), &st) != 0) return false;
++    if (out) {
++        out->size = int64_t(st.st_size);
++#ifdef __APPLE__
++        out->mtime_ns = int64_t(st.st_mtimespec.tv_sec) * 1'000'000'000 + st.st_mtimespec.tv_nsec;
++#else
++        out->mtime_ns = int64_t(st.st_mtim.tv_sec) * 1'000'000'000 + st.st_mtim.tv_nsec;
++#endif
++    }
++    return true;
++#endif
++}
++
++int rename_no_replace(const std::string& from, const std::string& to, std::string* message) {
++#ifdef _WIN32
++    if (MoveFileExW(widen(from).c_str(), widen(to).c_str(), 0)) return 0;
++    DWORD e = GetLastError();
++    if (message) *message = last_error_message(e);
++    switch (e) {
++    case ERROR_ALREADY_EXISTS:
++    case ERROR_FILE_EXISTS: return EEXIST;
++    case ERROR_NOT_SAME_DEVICE: return EXDEV;
++    case ERROR_FILE_NOT_FOUND:
++    case ERROR_PATH_NOT_FOUND: return ENOENT;
++    default: return EIO;
++    }
++#else
++#ifdef __APPLE__
++    int rc = ::renamex_np(from.c_str(), to.c_str(), RENAME_EXCL);
++#else
++    int rc = ::rename(from.c_str(), to.c_str());
++#endif
++    if (rc == 0) return 0;
++    int e = errno;
++    if (message) *message = std::strerror(e);
++    return e;
++#endif
++}
++
++// --- text and paths ----------------------------------------------------------------------
++
++std::string nfc(const std::string& s) {
++    bool ascii = std::all_of(s.begin(), s.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
++    if (ascii) return s;
++#if defined(__APPLE__)
++    CFStringRef in = CFStringCreateWithBytes(nullptr, reinterpret_cast<const UInt8*>(s.data()), CFIndex(s.size()),
++                                             kCFStringEncodingUTF8, false);
++    if (!in) return s;
++    CFMutableStringRef m = CFStringCreateMutableCopy(nullptr, 0, in);
++    CFStringNormalize(m, kCFStringNormalizationFormC);
++    CFIndex len = CFStringGetLength(m), used = 0;
++    CFStringGetBytes(m, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false, nullptr, 0, &used);
++    std::string out(size_t(used), '\0');
++    CFStringGetBytes(m, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false,
++                     reinterpret_cast<UInt8*>(out.data()), used, &used);
++    CFRelease(m);
++    CFRelease(in);
++    return out;
++#elif defined(_WIN32)
++    std::wstring w = widen(s);
++    int need = NormalizeString(NormalizationC, w.c_str(), int(w.size()), nullptr, 0);
++    // The estimate can be short; NormalizeString says so and gives a better one.
++    for (int attempt = 0; attempt < 4 && need > 0; ++attempt) {
++        std::wstring out(size_t(need), L'\0');
++        int got = NormalizeString(NormalizationC, w.c_str(), int(w.size()), out.data(), need);
++        if (got > 0) return narrow(out.data(), got);
++        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) break;
++        need = -got;
++    }
++    return s;  // invalid UTF-16 or no memory: compare as given
++#else
++    return s;
++#endif
++}
++
++std::string path_string(const fs::path& p) {
++#ifdef _WIN32
++    return p.generic_string();
++#else
++    return p.string();
++#endif
++}
++
++size_t root_length(const std::string& path) {
++#ifdef _WIN32
++    auto sep = [](char c) { return c == '/' || c == '\\'; };
++    // C:/
++    if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && sep(path[2])) return 3;
++    // //server/share/ (and \\?\C:\ style prefixes, which are read the same way)
++    if (path.size() >= 2 && sep(path[0]) && sep(path[1])) {
++        size_t server_end = path.find_first_of("/\\", 2);
++        if (server_end == std::string::npos) return path.size();
++        size_t share_end = path.find_first_of("/\\", server_end + 1);
++        if (share_end == std::string::npos) return path.size();
++        return share_end + 1;
++    }
++    if (!path.empty() && sep(path[0])) return 1;
++    return 0;
++#else
++    return !path.empty() && path[0] == '/' ? 1 : 0;
++#endif
++}
++
++std::string strip_trailing_separators(std::string path) {
++    size_t keep = std::max<size_t>(root_length(path), 1);
++    while (path.size() > keep && path.back() == '/') path.pop_back();
++    return path;
++}
++
++std::string to_spklib_separators(std::string path) {
++#ifdef _WIN32
++    std::replace(path.begin(), path.end(), '\\', '/');
++#endif
++    return path;
++}
++
++// --- process -----------------------------------------------------------------------------
++
++bool utf8_code_page() {
++#ifdef _WIN32
++    return GetACP() == CP_UTF8;
++#else
++    return true;
++#endif
++}
++
++}  // namespace spklib::platform
+diff --git a/src/platform.hpp b/src/platform.hpp
+new file mode 100644
+index 0000000..e10809e
+--- /dev/null
++++ b/src/platform.hpp
+@@ -0,0 +1,79 @@
++// platform.hpp -- the few things that differ between macOS, Linux and
++// Windows: file times, the C time functions, a rename that never replaces,
++// Unicode NFC, and how a path is spelled as a string.
++//
++// Paths. spklib keeps every path as a UTF-8 string with '/' between
++// components. On macOS and Linux that is the native spelling and nothing here
++// changes it. On Windows it is the "generic" form of the native path:
++// `C:/Users/me/Pictures/A.NEF`, `//server/share/Photos`. Windows accepts '/'
++// in every API spklib calls (std::filesystem, SQLite, the C runtime), so the
++// strings are used as they are; only their root differs from POSIX ("C:/"
++// rather than "/"), which `root_length` and `split_root` know about.
++//
++// UTF-8 on Windows. The narrow-string APIs (std::filesystem::path from a
++// std::string, std::ifstream, argv) use the process's active code page. The
++// host and the tests embed a manifest that makes it UTF-8 (Windows 10 1903 or
++// later); `spklib_create` refuses to start when it is not, rather than
++// mangle a non-ASCII path (`utf8_code_page`).
++
++#pragma once
++
++#include <cstdint>
++#include <ctime>
++#include <filesystem>
++#include <string>
++
++namespace spklib::platform {
++
++// --- time --------------------------------------------------------------------------------
++
++void utc_tm(time_t t, std::tm* out);      ///< gmtime_r
++void local_tm(time_t t, std::tm* out);    ///< localtime_r
++time_t utc_time(std::tm* tm);             ///< timegm
++
++// --- files -------------------------------------------------------------------------------
++
++struct FileStat {
++    int64_t size = 0;
++    int64_t mtime_ns = 0;  ///< nanoseconds since 1970-01-01 UTC; 100 ns resolution on NTFS
++};
++
++/// stat(2), following links. False when nothing is at `path`.
++bool file_stat(const std::string& path, FileStat* out = nullptr);
++
++/// Rename `from` to `to` unless something is already at `to`. Returns 0, or
++/// an errno value: EEXIST (something is at `to`), EXDEV (another volume),
++/// ENOENT (no `from`), or another for anything else (`message` says what).
++/// macOS: renamex_np(RENAME_EXCL). Windows: MoveFileExW without
++/// MOVEFILE_REPLACE_EXISTING or MOVEFILE_COPY_ALLOWED. Linux: rename(2),
++/// which replaces -- as before this file existed; Linux is not shipped.
++int rename_no_replace(const std::string& from, const std::string& to, std::string* message);
++
++// --- text and paths ----------------------------------------------------------------------
++
++/// Unicode NFC. CoreFoundation on Apple, NormalizeString on Windows, the
++/// identity elsewhere (docs/DESIGN.md, open items).
++std::string nfc(const std::string& s);
++
++/// A path as spklib stores and returns it: `p.string()` on POSIX,
++/// `p.generic_string()` on Windows.
++std::string path_string(const std::filesystem::path& p);
++
++/// Length of the root of an absolute path in spklib's spelling: "/" -> 1;
++/// on Windows also "C:/" -> 3 and "//server/share/" -> its length. 0 when the
++/// path is not absolute.
++size_t root_length(const std::string& path);
++
++/// `path` without trailing '/', but never shorter than its root ("/", "C:/").
++std::string strip_trailing_separators(std::string path);
++
++/// Windows only: `\` -> `/`. Elsewhere the string is returned as it is (a
++/// backslash is a legal character in a macOS or Linux file name).
++std::string to_spklib_separators(std::string path);
++
++// --- process -----------------------------------------------------------------------------
++
++/// Windows: true when the active code page is UTF-8 (65001). Elsewhere true.
++bool utf8_code_page();
++
++}  // namespace spklib::platform
+diff --git a/src/sqlite.cpp b/src/sqlite.cpp
+index ba44d4d..dcd8acd 100644
+--- a/src/sqlite.cpp
++++ b/src/sqlite.cpp
+@@ -33,7 +33,17 @@ Db::Db(const std::string& path, Mode mode) {
+         // so nothing -- not even a -shm or a lock byte -- touches the disk.
+         // Only correct because the file is a snapshot nobody else writes.
+         flags |= SQLITE_OPEN_READONLY | SQLITE_OPEN_URI;
++#ifdef _WIN32
++        {
++            // file:///C:/dir/x.db -- SQLite reads a path that starts "/C:" as
++            // a drive -- or file:////server/share/x.db (sqlite.org/uri.html).
++            std::string p = path;
++            for (auto& c : p) if (c == '\\') c = '/';
++            target = "file://" + std::string(p.rfind("//", 0) == 0 ? "" : "/") + uri_escape(p) + "?mode=ro&immutable=1";
++        }
++#else
+         target = "file:" + uri_escape(path) + "?mode=ro&immutable=1";
++#endif
+         break;
+     case Mode::ReadWrite: flags |= SQLITE_OPEN_READWRITE; break;
+     case Mode::Create: flags |= SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE; break;
+diff --git a/tests/tests.cpp b/tests/tests.cpp
+index 4938694..3b9fbd5 100644
+--- a/tests/tests.cpp
++++ b/tests/tests.cpp
+@@ -7,8 +7,12 @@
+ // against an independent reading of the same database, and proves the
+ // catalog package is byte-for-byte and stat-for-stat what it was.
+ 
+-#include <sys/stat.h>
++#ifdef _WIN32
++#include <process.h>
++#define getpid _getpid
++#else
+ #include <unistd.h>
++#endif
+ 
+ #include <chrono>
+ #include <cstdio>
+@@ -23,7 +27,19 @@
+ #include <string>
+ #include <vector>
+ 
++#ifdef _WIN32
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#endif
++
++#include "capture_one.hpp"
+ #include "json.hpp"
++#include "platform.hpp"
+ #include "spklib/spklib.h"
+ #include "sqlite.hpp"
+ 
+@@ -107,17 +123,22 @@ static std::string read_file(const fs::path& p) {
+     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+ }
+ 
+-/// Every file under `root`: path -> size, mtime and (for files under 256 MB)
+-/// a 64-bit FNV-1a of the bytes. What "the package did not change" means.
++/// Every file under `root`: path -> size, mtime, type and permissions, and
++/// (for files under 256 MB) a 64-bit FNV-1a of the bytes. What "the package
++/// did not change" means.
+ static std::map<std::string, std::string> census(const fs::path& root, bool hash = true) {
+     std::map<std::string, std::string> out;
+     for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied);
+          it != fs::recursive_directory_iterator(); ++it) {
+-        struct stat st {};
+-        if (::lstat(it->path().c_str(), &st) != 0) continue;
+-        std::string v = std::to_string(st.st_size) + "/" + std::to_string(st.st_mtimespec.tv_sec) + "." +
+-                        std::to_string(st.st_mtimespec.tv_nsec) + "/" + std::to_string(st.st_mode);
+-        if (hash && S_ISREG(st.st_mode) && st.st_size < (256 << 20) && it->path().extension() != ".cot" &&
++        std::error_code ec;
++        fs::file_status ls = fs::symlink_status(it->path(), ec);
++        if (ec) continue;
++        spklib::platform::FileStat st;
++        bool regular = fs::is_regular_file(ls);
++        if (fs::is_symlink(ls) || !spklib::platform::file_stat(it->path().generic_string(), &st)) st = {};
++        std::string v = std::to_string(st.size) + "/" + std::to_string(st.mtime_ns) + "/" + std::to_string(int(ls.type())) + "." +
++                        std::to_string(int(ls.permissions()));
++        if (hash && regular && st.size < (256 << 20) && it->path().extension() != ".cot" &&
+             it->path().extension() != ".cop" && it->path().extension() != ".cof") {
+             uint64_t h = 1469598103934665603ull;
+             std::ifstream in(it->path(), std::ios::binary);
+@@ -128,11 +149,44 @@ static std::map<std::string, std::string> census(const fs::path& root, bool hash
+             }
+             v += "/" + std::to_string(h);
+         }
+-        out[it->path().string()] = v;
++        out[it->path().generic_string()] = v;
+     }
+     return out;
+ }
+ 
++/// Where a folder is, as Capture One writes it: on a Mac ZMACROOT "/" and the
++/// rest; on Windows ZWINROOT "C:\\", ZMACROOT '' and the rest with
++/// backslashes (Capture One 16.6.4 for Windows, a catalog made for this).
++struct C1Where { std::string mac, win, rel, volume; };
++static C1Where c1_where(const fs::path& dir) {
++#ifdef _WIN32
++    std::string n = fs::path(dir).make_preferred().string();
++    return {"", n.substr(0, 3), n.substr(3), ""};
++#else
++    std::string s = dir.string();
++    return {"/", "", s.substr(1), "/"};
++#endif
++}
++
++static std::string sql_text(const std::string& s) {
++    if (s.empty()) return "NULL";
++    std::string out = "'";
++    for (char c : s) { out += c; if (c == '\'') out += '\''; }
++    return out + "'";
++}
++
++/// One ZPATHLOCATION row's values, (Z_ENT, Z_PK, ZMACROOT, ZWINROOT, ZRELATIVEPATH, ZISRELATIVE, ZVOLUME).
++static std::string c1_location_row(int pk, const fs::path& dir) {
++    C1Where w = c1_where(dir);
++#ifdef _WIN32
++    std::string mac = "''";
++#else
++    std::string mac = sql_text(w.mac);
++#endif
++    return "(38, " + std::to_string(pk) + ", " + mac + ", " + sql_text(w.win) + ", " + sql_text(w.rel) + ", 0, " +
++           sql_text(w.volume) + ")";
++}
++
+ // --- a Capture One catalog, built ----------------------------------------------------------------
+ 
+ /// A catalog with the real schema and a small, known content:
+@@ -156,16 +210,18 @@ struct FakeCatalog {
+         touch(photos / "C.JPG", "jpg-c");
+         touch(photos / "Sub/D.ARW", "arw-d");
+         touch(package / "Originals/2026/01/02/1/E.tif", "tif-e");
+-        Db d(db.string(), Db::Mode::Create);
++        Db d(db.generic_string(), Db::Mode::Create);
+         d.exec(read_file(fs::path(SPKLIB_FIXTURES) / "capture_one_16_8_schema.sql"));
+         d.exec("INSERT INTO ZVERSIONINFO VALUES (32, 1, '16.8.6.25 Pro Mac', '9.0.0 Mac', 160800, '16.8.6.25 Pro Mac', 160800)");
+         d.exec("INSERT INTO ZDOCUMENTCONTENT (Z_ENT, Z_PK, ZDATECREATED, ZDOCUMENTTYPE, ZDOCUMENTUUID, ZROOTCOLLECTION) VALUES (34, 1, 1729735821, 1, '" + uuid + "', 1)");
+-        std::string ph = photos.string();
+-        d.exec("INSERT INTO ZPATHLOCATION (Z_ENT, Z_PK, ZMACROOT, ZRELATIVEPATH, ZISRELATIVE, ZVOLUME) VALUES"
+-               " (38, 3, '/', '" + ph.substr(1) + "', 0, '/'),"
+-               " (38, 4, '/', '" + ph.substr(1) + "/Sub', 0, '/'),"
+-               " (38, 5, NULL, 'Originals/2026/01/02/1', 1, NULL),"
+-               " (38, 6, '/', '" + fs::path(ph).parent_path().string().substr(1) + "', 0, '/')");
++#ifdef _WIN32
++        const char* in_package = "'Originals\\2026\\01\\02\\1'";
++#else
++        const char* in_package = "'Originals/2026/01/02/1'";
++#endif
++        d.exec("INSERT INTO ZPATHLOCATION (Z_ENT, Z_PK, ZMACROOT, ZWINROOT, ZRELATIVEPATH, ZISRELATIVE, ZVOLUME) VALUES " +
++               c1_location_row(3, photos) + ", " + c1_location_row(4, photos / "Sub") + ","
++               " (38, 5, NULL, NULL, " + in_package + ", 1, NULL), " + c1_location_row(6, photos.parent_path()));
+         // ZEXP_DATE is the camera's wall clock as if UTC: 2024-01-08 23:39:04.
+         d.exec("INSERT INTO ZIMAGE (Z_ENT, Z_PK, ZIMAGEUUID, ZIMAGEFILENAME, ZDISPLAYNAME, ZIMAGELOCATION, ZISINSIDECATALOG,"
+                " ZISTRASHED, ZIMAGECLASSIFICATION, ZWIDTH, ZHEIGHT, ZEXP_DATE, ZIMPORTDATE, ZCAMERA_MAKE, ZCAMERA_MODEL, ZISO) VALUES"
+@@ -214,7 +270,7 @@ struct FakeCatalog {
+ 
+     /// Change the catalog the way Capture One would, between syncs.
+     void edit(const std::string& sql) {
+-        Db d(db.string(), Db::Mode::ReadWrite);
++        Db d(db.generic_string(), Db::Mode::ReadWrite);
+         d.exec(sql);
+     }
+ };
+@@ -243,7 +299,7 @@ static void copies() {
+         FakeCatalog fc(root);
+         auto before = census(fc.package);
+         Ctx c;
+-        Json r = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}});
++        Json r = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}});
+         std::string L = r["library"];
+         CHECK(fs::exists(root / "Copy.spkcatalog/Library.spkdb"));
+         Json rep = r["report"];
+@@ -261,7 +317,7 @@ static void copies() {
+         CHECK_EQ(info["name"].get<std::string>(), std::string("Fake"));
+         CHECK_EQ(info["copied_from"]["kind"].get<std::string>(), std::string("capture_one.catalog"));
+         CHECK_EQ(info["copied_from"]["document_uuid"].get<std::string>(), fc.uuid);
+-        CHECK_EQ(info["copied_from"]["path"].get<std::string>(), fc.package.string());
++        CHECK_EQ(info["copied_from"]["path"].get<std::string>(), fc.package.generic_string());
+         CHECK_EQ(info["copied_from"]["format"].get<std::string>(), std::string("16.8.6.25 Pro Mac"));
+         CHECK(info["copied_from"]["fingerprint"].is_object());
+         CHECK(info["copied_from"]["copied_at"].is_string());
+@@ -271,7 +327,7 @@ static void copies() {
+         CHECK_EQ(all.size(), size_t(4));  // C is trashed, as in Capture One
+         for (auto& im : all) { CHECK(im["exists"].get<bool>()); CHECK_EQ(im["origin"].get<std::string>(), std::string("local")); }
+         Json a = find_by(all, "uuid", "IMG-A");
+-        CHECK_EQ(a["path"].get<std::string>(), (fc.photos / "A.NEF").string());
++        CHECK_EQ(a["path"].get<std::string>(), (fc.photos / "A.NEF").generic_string());
+         CHECK_EQ(a["captured_local"].get<std::string>(), std::string("2024-01-08T23:39:04"));
+         CHECK_EQ(a["camera"]["model"].get<std::string>(), std::string("NIKON Z6_3"));
+         CHECK_EQ(a["width"].get<int>(), 6048);
+@@ -280,7 +336,7 @@ static void copies() {
+         CHECK_EQ(a["variants"][1]["rating"].get<int>(), 4);
+         CHECK_EQ(find_by(all, "uuid", "IMG-B")["rating"].get<int>(), 3);
+         CHECK_EQ(find_by(all, "uuid", "IMG-B")["color_tag"].get<int>(), 2);
+-        CHECK_EQ(find_by(all, "uuid", "IMG-E")["path"].get<std::string>(), (fc.package / "Originals/2026/01/02/1/E.tif").string());
++        CHECK_EQ(find_by(all, "uuid", "IMG-E")["path"].get<std::string>(), (fc.package / "Originals/2026/01/02/1/E.tif").generic_string());
+         Json cimg = c("image.get", {{"library", L}, {"image", "IMG-C"}});
+         CHECK(cimg["trashed"].get<bool>());
+         CHECK_EQ(cimg["rating"].get<int>(), 5);
+@@ -323,11 +379,11 @@ static void copies() {
+         CHECK_EQ(find_by(f["keyword"], "value", "night")["count"].get<int>(), 2);
+ 
+         CHECK(before == census(fc.package));
+-        CHECK(!fs::exists(fc.db.string() + "-journal"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-journal"));
+         // Something already there is never overwritten.
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}}), std::string("exists"));
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}}), std::string("exists"));
+         touch(root / "AFile.spkcatalog", "x");
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "AFile.spkcatalog").string()}}), std::string("exists"));
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "AFile.spkcatalog").generic_string()}}), std::string("exists"));
+         CHECK_EQ(read_file(root / "AFile.spkcatalog"), std::string("x"));
+     });
+ 
+@@ -335,12 +391,12 @@ static void copies() {
+         fs::path root = tmpdir("copy-mirror");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string M = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "Mirror").string()}})["library"];
++        std::string M = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "Mirror").generic_string()}})["library"];
+         c("meta.set", {{"library", M}, {"variants", {"VAR-A1"}}, {"rating", 2}});
+         c("meta.set", {{"library", M}, {"variants", {"VAR-D1"}}, {"color_tag", 5}});
+         c("images.trash", {{"library", M}, {"images", {"IMG-C"}}, {"trashed", false}});
+         c("edit.put", {{"library", M}, {"variant", "VAR-B1"}, {"base_revision", 0}, {"edit", {{"k", 1}}}});
+-        Json r = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}, {"mirror", M}});
++        Json r = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}, {"mirror", M}});
+         std::string L = r["library"];
+         CHECK(L != M);
+         Json fm = r["report"]["from_mirror"];
+@@ -366,10 +422,10 @@ static void copies() {
+         fs::path other_root = tmpdir("copy-mirror-other");
+         FakeCatalog other(other_root);
+         other.edit("UPDATE ZDOCUMENTCONTENT SET ZDOCUMENTUUID = 'ANOTHER'");
+-        std::string O = c("capture_one.link", {{"source", other.package.string()}, {"path", (other_root / "M").string()}})["library"];
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "C2").string()}, {"mirror", O}}), std::string("conflict"));
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "C3").string()}, {"mirror", L}}), std::string("invalid_params"));
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "C4").string()}, {"mirror", "L999"}}), std::string("not_found"));
++        std::string O = c("capture_one.link", {{"source", other.package.generic_string()}, {"path", (other_root / "M").generic_string()}})["library"];
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "C2").generic_string()}, {"mirror", O}}), std::string("conflict"));
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "C3").generic_string()}, {"mirror", L}}), std::string("invalid_params"));
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "C4").generic_string()}, {"mirror", "L999"}}), std::string("not_found"));
+         CHECK(!fs::exists(root / "C2.spkcatalog"));
+         CHECK(!fs::exists(root / "C3.spkcatalog"));
+     });
+@@ -380,12 +436,12 @@ static void copies() {
+         touch(fc.photos / "G.NEF", "nef-g");
+         touch(root / "New/H.NEF", "nef-h");
+         Ctx c;
+-        std::string L = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}})["library"];
++        std::string L = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}})["library"];
+         CHECK_EQ(c.err("collection.update", {{"library", L}, {"collection", "COL-PICKS"}, {"name", "Keepers"}}), std::string(""));
+         CHECK_EQ(c("collection.add", {{"library", L}, {"collection", "COL-PICKS"}, {"images", {"IMG-E"}}})["added"].get<int>(), 1);
+         CHECK_EQ(c.err("meta.set", {{"library", L}, {"variants", {"VAR-B1"}}, {"rating", 5}}), std::string(""));
+         CHECK_EQ(c.err("collection.update", {{"library", L}, {"collection", "COL-SMART"}, {"criteria", {{"min_rating", 5}}}}), std::string(""));
+-        Json add = c("images.add", {{"library", L}, {"collection", "COL-PICKS"}, {"items", {(root / "New/H.NEF").string()}}});
++        Json add = c("images.add", {{"library", L}, {"collection", "COL-PICKS"}, {"items", {(root / "New/H.NEF").generic_string()}}});
+         CHECK_EQ(add["added"].get<int>(), 1);
+         CHECK(add.contains("recent_import"));
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+@@ -396,7 +452,7 @@ static void copies() {
+         CHECK_EQ(find_by(cols, "uuid", "COL-SMART")["image_count"].get<int>(), 1);
+         CHECK_EQ(c("image.get", {{"library", L}, {"image", "IMG-B"}})["rating"].get<int>(), 5);
+         // A copied folder is a folder SpektraLab can watch: its copied images are the ones there.
+-        Json fa = c("folders.add", {{"library", L}, {"path", fc.photos.string()}});
++        Json fa = c("folders.add", {{"library", L}, {"path", fc.photos.generic_string()}});
+         CHECK_EQ(fa["sync"]["unchanged"].get<int>(), 4);  // A, B, C, Sub/D
+         CHECK_EQ(fa["sync"]["added"].get<int>(), 1);      // G
+         CHECK_EQ(c.err("library.sync", {{"library", L}}), std::string("invalid_params"));
+@@ -408,9 +464,9 @@ static void copies() {
+         CHECK_EQ(u["members"]["added"].get<int>(), 0);
+         CHECK(find_by(c("collections.list", {{"library", L}})["collections"], "uuid", "COL-IMPORT").is_null());
+         // A library that is not a copy has nothing to update from.
+-        std::string N = c("library.create", {{"path", (root / "Native").string()}})["library"];
++        std::string N = c("library.create", {{"path", (root / "Native").generic_string()}})["library"];
+         CHECK_EQ(c.err("capture_one.update", {{"library", N}}), std::string("read_only"));
+-        std::string Mi = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "Mirror").string()}})["library"];
++        std::string Mi = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "Mirror").generic_string()}})["library"];
+         CHECK_EQ(c.err("capture_one.update", {{"library", Mi}}), std::string("read_only"));
+     });
+ 
+@@ -419,7 +475,7 @@ static void copies() {
+         FakeCatalog fc(root);
+         touch(root / "Mine/G.NEF", "nef-g");
+         Ctx c;
+-        Json r = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}});
++        Json r = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}});
+         std::string L = r["library"];
+         Json fp0 = r["info"]["copied_from"]["fingerprint"];
+ 
+@@ -430,7 +486,7 @@ static void copies() {
+         c("collection.add", {{"library", L}, {"collection", "COL-PICKS"}, {"images", {"IMG-E"}}});
+         c("collection.update", {{"library", L}, {"collection", "COL-PICKS"}, {"name", "Mine"}});
+         std::string mine = c("collection.create", {{"library", L}, {"kind", "album"}, {"name", "SpektraLab's"}})["collection"];
+-        Json g = c("images.add", {{"library", L}, {"collection", mine}, {"items", {(root / "Mine/G.NEF").string()}}});
++        Json g = c("images.add", {{"library", L}, {"collection", mine}, {"items", {(root / "Mine/G.NEF").generic_string()}}});
+         std::string gid = g["results"][0]["image"];
+ 
+         // Capture One: a new image F in a new album, B and A2 re-rated, D deleted, A out of the
+@@ -528,49 +584,49 @@ static void copies() {
+         CHECK_EQ(u3["variants"]["restored"].get<int>(), 1);
+         CHECK_EQ(u3["images"]["added"].get<int>(), 0);
+         CHECK(!find_by(c("images.list", {{"library", L}})["images"], "uuid", "IMG-D").is_null());
+-        CHECK(!fs::exists(fc.db.string() + "-journal"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-journal"));
+     });
+ 
+     run("update: a moved catalog is found again by its document UUID", [] {
+         fs::path root = tmpdir("copy-moved");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}})["library"];
++        std::string L = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}})["library"];
+         fs::path moved = root / "Moved.cocatalog";
+         fs::rename(fc.package, moved);
+         CHECK_EQ(c.err("capture_one.update", {{"library", L}}), std::string("not_found"));
+-        Json u = c("capture_one.update", {{"library", L}, {"source", moved.string()}});
++        Json u = c("capture_one.update", {{"library", L}, {"source", moved.generic_string()}});
+         CHECK(!u["skipped"].get<bool>());
+-        CHECK_EQ(u["moved_from"].get<std::string>(), fc.package.string());
++        CHECK_EQ(u["moved_from"].get<std::string>(), fc.package.generic_string());
+         CHECK_EQ(u["images"]["unchanged"].get<int>(), 5);
+-        CHECK_EQ(c("library.info", {{"library", L}})["copied_from"]["path"].get<std::string>(), moved.string());
++        CHECK_EQ(c("library.info", {{"library", L}})["copied_from"]["path"].get<std::string>(), moved.generic_string());
+         // The in-catalog image is Capture One's file: it is where the package went.
+         Json e = c("image.get", {{"library", L}, {"image", "IMG-E"}});
+-        CHECK_EQ(e["path"].get<std::string>(), (moved / "Originals/2026/01/02/1/E.tif").string());
++        CHECK_EQ(e["path"].get<std::string>(), (moved / "Originals/2026/01/02/1/E.tif").generic_string());
+         CHECK(e["exists"].get<bool>());
+         CHECK(c("capture_one.update", {{"library", L}})["skipped"].get<bool>());
+         // Another catalog is not this one, wherever it is.
+         fs::path other_root = tmpdir("copy-moved-other");
+         FakeCatalog other(other_root);
+         other.edit("UPDATE ZDOCUMENTCONTENT SET ZDOCUMENTUUID = 'ANOTHER'");
+-        CHECK_EQ(c.err("capture_one.update", {{"library", L}, {"source", other.package.string()}}), std::string("conflict"));
+-        CHECK_EQ(c("library.info", {{"library", L}})["copied_from"]["path"].get<std::string>(), moved.string());
++        CHECK_EQ(c.err("capture_one.update", {{"library", L}, {"source", other.package.generic_string()}}), std::string("conflict"));
++        CHECK_EQ(c("library.info", {{"library", L}})["copied_from"]["path"].get<std::string>(), moved.generic_string());
+     });
+ 
+     run("copy and update answer source_busy while Capture One writes", [] {
+         fs::path root = tmpdir("copy-busy");
+         FakeCatalog fc(root);
+         Ctx c;
+-        touch(fc.db.string() + "-journal", "hot");
+-        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}}), std::string("source_busy"));
++        touch(fc.db.generic_string() + "-journal", "hot");
++        CHECK_EQ(c.err("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}}), std::string("source_busy"));
+         CHECK(!fs::exists(root / "Copy.spkcatalog"));
+-        fs::remove(fc.db.string() + "-journal");
+-        std::string L = c("capture_one.copy", {{"source", fc.package.string()}, {"path", (root / "Copy").string()}})["library"];
++        fs::remove(fc.db.generic_string() + "-journal");
++        std::string L = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}})["library"];
+         fc.edit("UPDATE ZVARIANTMETADATA SET ZBASIC_RATING = 1 WHERE ZLAYER = 103");
+-        touch(fc.db.string() + "-journal", "hot");
++        touch(fc.db.generic_string() + "-journal", "hot");
+         CHECK_EQ(c.err("capture_one.update", {{"library", L}}), std::string("source_busy"));
+         CHECK_EQ(c("image.get", {{"library", L}, {"image", "IMG-B"}})["rating"].get<int>(), 3);
+-        fs::remove(fc.db.string() + "-journal");
++        fs::remove(fc.db.generic_string() + "-journal");
+         CHECK_EQ(c("capture_one.update", {{"library", L}})["variants"]["updated"].get<int>(), 1);
+     });
+ }
+@@ -583,9 +639,9 @@ static std::string local_name(const std::string& utc) {
+     int y, mo, d, h, mi, s;
+     std::sscanf(utc.c_str(), "%d-%d-%dT%d:%d:%d", &y, &mo, &d, &h, &mi, &s);
+     tm.tm_year = y - 1900; tm.tm_mon = mo - 1; tm.tm_mday = d; tm.tm_hour = h; tm.tm_min = mi; tm.tm_sec = s;
+-    time_t t = timegm(&tm);
++    time_t t = spklib::platform::utc_time(&tm);
+     std::tm lt{};
+-    localtime_r(&t, &lt);
++    spklib::platform::local_tm(t, &lt);
+     char buf[32];
+     std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", &lt);
+     return buf;
+@@ -595,13 +651,13 @@ static void recent_import_times() {
+     run("images.add recent_import_at: an old import keeps its time, its place and the newest-20 trim", [] {
+         fs::path root = tmpdir("import-at");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "R").string()}})["library"];
++        std::string L = c("library.create", {{"path", (root / "R").generic_string()}})["library"];
+         auto import_at = [&](int day, int hour) {
+             char when[32];
+             std::snprintf(when, sizeof when, "2020-10-%02dT%02d:00:00Z", day, hour);
+             fs::path f = root / ("P/" + std::to_string(day) + "-" + std::to_string(hour) + ".NEF");
+-            touch(f, f.filename().string());
+-            Json r = c("images.add", {{"library", L}, {"items", {f.string()}}, {"recent_import_at", when}});
++            touch(f, f.filename().generic_string());
++            Json r = c("images.add", {{"library", L}, {"items", {f.generic_string()}}, {"recent_import_at", when}});
+             return std::pair(r, std::string(when));
+         };
+         // Twenty imports, newest first, as a migration might send them.
+@@ -641,16 +697,16 @@ static void recent_import_times() {
+         CHECK(ordered);
+         // An offset is a zone like any other; garbage is refused; no import, no album.
+         touch(root / "P/z.NEF", "z");
+-        Json z = c("images.add", {{"library", L}, {"items", {(root / "P/z.NEF").string()}}, {"recent_import_at", "2020-10-30T18:00:00+08:00"}});
++        Json z = c("images.add", {{"library", L}, {"items", {(root / "P/z.NEF").generic_string()}}, {"recent_import_at", "2020-10-30T18:00:00+08:00"}});
+         CHECK_EQ(find_by(albums(), "uuid", z["recent_import"].get<std::string>())["created_at"].get<std::string>(), std::string("2020-10-30T10:00:00Z"));
+         touch(root / "P/y.NEF", "y");
+-        CHECK_EQ(c.err("images.add", {{"library", L}, {"items", {(root / "P/y.NEF").string()}}, {"recent_import_at", "last Tuesday"}}), std::string("invalid_params"));
++        CHECK_EQ(c.err("images.add", {{"library", L}, {"items", {(root / "P/y.NEF").generic_string()}}, {"recent_import_at", "last Tuesday"}}), std::string("invalid_params"));
+         touch(root / "P/x.NEF", "x");
+-        CHECK(!c("images.add", {{"library", L}, {"items", {(root / "P/x.NEF").string()}}, {"recent_import", false},
++        CHECK(!c("images.add", {{"library", L}, {"items", {(root / "P/x.NEF").generic_string()}}, {"recent_import", false},
+                                 {"recent_import_at", "2020-10-31T10:00:00Z"}}).contains("recent_import"));
+         // Without it, the album is made now.
+         touch(root / "P/w.NEF", "w");
+-        Json w = c("images.add", {{"library", L}, {"items", {(root / "P/w.NEF").string()}}});
++        Json w = c("images.add", {{"library", L}, {"items", {(root / "P/w.NEF").generic_string()}}});
+         CHECK(find_by(albums(), "uuid", w["recent_import"].get<std::string>())["created_at"].get<std::string>() > std::string("2026-01-01"));
+     });
+ 
+@@ -659,8 +715,8 @@ static void recent_import_times() {
+         FakeCatalog fc(root);
+         touch(root / "New/x.NEF", "x");
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
+-        Json add = c("images.add", {{"library", L}, {"items", {(root / "New/x.NEF").string()}}, {"recent_import_at", "2025-11-05T04:39:00Z"}});
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
++        Json add = c("images.add", {{"library", L}, {"items", {(root / "New/x.NEF").generic_string()}}, {"recent_import_at", "2025-11-05T04:39:00Z"}});
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+         Json al = find_by(cols, "uuid", add["recent_import"].get<std::string>());
+         CHECK_EQ(al["created_at"].get<std::string>(), std::string("2025-11-05T04:39:00Z"));
+@@ -676,7 +732,7 @@ static void synthetic() {
+     run("probe reads version, counts and a verdict", [] {
+         FakeCatalog fc(tmpdir("probe"));
+         Ctx c;
+-        Json p = c("capture_one.probe", {{"path", fc.package.string()}});
++        Json p = c("capture_one.probe", {{"path", fc.package.generic_string()}});
+         CHECK(p["supported"].get<bool>());
+         CHECK_EQ(p["document_uuid"].get<std::string>(), fc.uuid);
+         CHECK_EQ(p["format"].get<std::string>(), std::string("16.8.6.25 Pro Mac"));
+@@ -686,7 +742,7 @@ static void synthetic() {
+         CHECK_EQ(p["counts"]["trashed"].get<int>(), 1);
+         CHECK_EQ(p["counts"]["inside_catalog"].get<int>(), 1);
+         // The database file inside the package is accepted too.
+-        CHECK(c("capture_one.probe", {{"path", fc.db.string()}})["supported"].get<bool>());
++        CHECK(c("capture_one.probe", {{"path", fc.db.generic_string()}})["supported"].get<bool>());
+     });
+ 
+     run("link mirrors the catalog and never writes to it", [] {
+@@ -694,7 +750,7 @@ static void synthetic() {
+         FakeCatalog fc(root);
+         auto before = census(fc.package);
+         Ctx c;
+-        Json r = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "Mirror").string()}});
++        Json r = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "Mirror").generic_string()}});
+         std::string L = r["library"];
+         CHECK(fs::exists(root / "Mirror.spkcatalog/Library.spkdb"));
+         CHECK_EQ(r["sync"]["images"]["added"].get<int>(), 5);
+@@ -707,12 +763,12 @@ static void synthetic() {
+         CHECK_EQ(all.size(), size_t(4));  // C is trashed
+         for (auto& im : all) CHECK(im["exists"].get<bool>());
+         Json a = find_by(all, "uuid", "IMG-A");
+-        CHECK_EQ(a["path"].get<std::string>(), (fc.photos / "A.NEF").string());
++        CHECK_EQ(a["path"].get<std::string>(), (fc.photos / "A.NEF").generic_string());
+         CHECK_EQ(a["captured_local"].get<std::string>(), std::string("2024-01-08T23:39:04"));
+         CHECK_EQ(a["variants"].size(), size_t(2));
+         CHECK_EQ(a["variants"][1]["rating"].get<int>(), 4);
+         Json e = find_by(all, "uuid", "IMG-E");
+-        CHECK_EQ(e["path"].get<std::string>(), (fc.package / "Originals/2026/01/02/1/E.tif").string());
++        CHECK_EQ(e["path"].get<std::string>(), (fc.package / "Originals/2026/01/02/1/E.tif").generic_string());
+         Json b = find_by(all, "uuid", "IMG-B");
+         CHECK_EQ(b["rating"].get<int>(), 3);
+         CHECK_EQ(b["color_tag"].get<int>(), 2);
+@@ -743,16 +799,16 @@ static void synthetic() {
+         c("library.sync", {{"library", L}});
+         c("library.sync", {{"library", L}, {"force", true}});
+         CHECK(before == census(fc.package));
+-        CHECK(!fs::exists(fc.db.string() + "-journal"));
+-        CHECK(!fs::exists(fc.db.string() + "-wal"));
+-        CHECK(!fs::exists(fc.db.string() + "-shm"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-journal"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-wal"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-shm"));
+     });
+ 
+     run("resync: skipped when unchanged, exact when forced", [] {
+         fs::path root = tmpdir("resync");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         Json s1 = c("library.sync", {{"library", L}});
+         CHECK(s1["skipped"].get<bool>());
+         Json s2 = c("library.sync", {{"library", L}, {"force", true}});
+@@ -766,7 +822,7 @@ static void synthetic() {
+         fs::path root = tmpdir("survive");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         Json e1 = c("edit.put", {{"library", L}, {"variant", "VAR-B1"}, {"base_revision", 0},
+                                  {"edit", {{"schemaVersion", 3}, {"params", {{"film_stock", "kodak_portra_400"}}}}}});
+         CHECK_EQ(e1["revision"].get<int>(), 1);
+@@ -818,7 +874,7 @@ static void synthetic() {
+         fs::path root = tmpdir("readonly");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         CHECK_EQ(c.err("collection.add", {{"library", L}, {"collection", "COL-PICKS"}, {"images", {"IMG-A"}}}), std::string("read_only"));
+         CHECK_EQ(c.err("collection.update", {{"library", L}, {"collection", "COL-PICKS"}, {"name", "x"}}), std::string("read_only"));
+         CHECK_EQ(c.err("collection.delete", {{"library", L}, {"collection", "COL-PICKS"}}), std::string("read_only"));
+@@ -830,14 +886,14 @@ static void synthetic() {
+         c("library.sync", {{"library", L}, {"force", true}});
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+         CHECK_EQ(find_by(cols, "uuid", mine)["image_count"].get<int>(), 2);
+-        CHECK_EQ(c.err("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}}), std::string(""));
++        CHECK_EQ(c.err("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}}), std::string(""));
+     });
+ 
+     run("edits: revision guards a lost update", [] {
+         fs::path root = tmpdir("edits");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         CHECK(c("edit.get", {{"library", L}, {"variant", "VAR-A1"}})["edit"].is_null());
+         c("edit.put", {{"library", L}, {"variant", "VAR-A1"}, {"base_revision", 0}, {"edit", {{"k", 1}}}});
+         CHECK_EQ(c.err("edit.put", {{"library", L}, {"variant", "VAR-A1"}, {"base_revision", 0}, {"edit", {{"k", 2}}}}), std::string("conflict"));
+@@ -857,45 +913,45 @@ static void synthetic() {
+         fs::path root = tmpdir("refuse");
+         FakeCatalog fc(root);
+         Ctx c;
+-        touch(fc.db.string() + "-journal", "hot");
+-        CHECK_EQ(c.err("capture_one.probe", {{"path", fc.package.string()}}), std::string("source_busy"));
+-        fs::remove(fc.db.string() + "-journal");
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        touch(fc.db.generic_string() + "-journal", "hot");
++        CHECK_EQ(c.err("capture_one.probe", {{"path", fc.package.generic_string()}}), std::string("source_busy"));
++        fs::remove(fc.db.generic_string() + "-journal");
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         // Another catalog put where this one was.
+         fs::path other_root = tmpdir("refuse-other");
+         FakeCatalog other(other_root);
+         other.edit("UPDATE ZDOCUMENTCONTENT SET ZDOCUMENTUUID = 'ANOTHER'");
+-        CHECK_EQ(c.err("library.sync", {{"library", L}, {"source", other.package.string()}}), std::string("conflict"));
++        CHECK_EQ(c.err("library.sync", {{"library", L}, {"source", other.package.generic_string()}}), std::string("conflict"));
+         // A schema without what the reader needs.
+         fs::path bad = tmpdir("refuse-bad") / "Bad.cocatalog";
+         fs::create_directories(bad);
+-        { Db d((bad / "Bad.cocatalogdb").string(), Db::Mode::Create); d.exec("CREATE TABLE ZIMAGE (Z_PK INTEGER)"); }
+-        Json p = c("capture_one.probe", {{"path", bad.string()}});
++        { Db d((bad / "Bad.cocatalogdb").generic_string(), Db::Mode::Create); d.exec("CREATE TABLE ZIMAGE (Z_PK INTEGER)"); }
++        Json p = c("capture_one.probe", {{"path", bad.generic_string()}});
+         CHECK(!p["supported"].get<bool>());
+         CHECK(p["reason"].get<std::string>().find("ZPATHLOCATION") != std::string::npos);
+-        CHECK_EQ(c.err("capture_one.probe", {{"path", (root / "nothing").string()}}), std::string("not_found"));
++        CHECK_EQ(c.err("capture_one.probe", {{"path", (root / "nothing").generic_string()}}), std::string("not_found"));
+         CHECK_EQ(c.err("unknown.method"), std::string("unknown_method"));
+         // A Capture One session is probed, not linked (yet).
+         fs::path sess = tmpdir("refuse-session") / "Shoot";
+         fs::create_directories(sess);
+         fs::copy_file(fc.db, sess / "Shoot.cosessiondb");
+-        Json sp = c("capture_one.probe", {{"path", sess.string()}});
++        Json sp = c("capture_one.probe", {{"path", sess.generic_string()}});
+         CHECK_EQ(sp["document"].get<std::string>(), std::string("session"));
+-        CHECK_EQ(c.err("capture_one.link", {{"source", sess.string()}, {"path", (root / "S").string()}}), std::string("unsupported"));
++        CHECK_EQ(c.err("capture_one.link", {{"source", sess.generic_string()}, {"path", (root / "S").generic_string()}}), std::string("unsupported"));
+         CHECK(!fs::exists(root / "S.spkcatalog"));
+     });
+ 
+     run("store keying: a moved catalog finds its library again", [] {
+         fs::path root = tmpdir("store");
+         FakeCatalog fc(root);
+-        Ctx c({{"store", (root / "Store").string()}});
+-        Json r1 = c("capture_one.link", {{"source", fc.package.string()}});
++        Ctx c({{"store", (root / "Store").generic_string()}});
++        Json r1 = c("capture_one.link", {{"source", fc.package.generic_string()}});
+         CHECK(fs::exists(root / "Store/Linked" / (fc.uuid + ".spkcatalog")));
+         c("edit.put", {{"library", r1["library"]}, {"variant", "VAR-A1"}, {"base_revision", 0}, {"edit", {{"k", 1}}}});
+         c("library.close", {{"library", r1["library"]}});
+         fs::rename(fc.package, root / "Moved.cocatalog");
+-        Json r2 = c("capture_one.link", {{"source", (root / "Moved.cocatalog").string()}});
+-        CHECK_EQ(r2["info"]["origin"]["path"].get<std::string>(), (root / "Moved.cocatalog").string());
++        Json r2 = c("capture_one.link", {{"source", (root / "Moved.cocatalog").generic_string()}});
++        CHECK_EQ(r2["info"]["origin"]["path"].get<std::string>(), (root / "Moved.cocatalog").generic_string());
+         CHECK_EQ(c("edit.get", {{"library", r2["library"]}, {"variant", "VAR-A1"}})["revision"].get<int>(), 1);
+     });
+ 
+@@ -905,17 +961,17 @@ static void synthetic() {
+         touch(root / "Shoot/Day1/b.JPG", "2");
+         touch(root / "Shoot/c.tif", "3");
+         Ctx c;
+-        Json cr = c("library.create", {{"path", (root / "Mine").string()}, {"kind", "catalog"}});
++        Json cr = c("library.create", {{"path", (root / "Mine").generic_string()}, {"kind", "catalog"}});
+         std::string L = cr["library"];
+         CHECK_EQ(cr["info"]["origin"]["kind"].get<std::string>(), std::string("none"));
+         std::string album = c("collection.create", {{"library", L}, {"kind", "album"}, {"name", "Roll 1"}})["collection"];
+         Json add = c("images.add", {{"library", L}, {"collection", album},
+-                                    {"items", {(root / "Shoot/Day1/a.NEF").string(),
+-                                               {{"path", (root / "Shoot/Day1/b.JPG").string()}, {"metadata", {{"captured_local", "2026-10-01T09:30:00"}, {"width", 4000}}}},
+-                                               (root / "Shoot/c.tif").string(), (root / "Shoot/missing.NEF").string()}}});
++                                    {"items", {(root / "Shoot/Day1/a.NEF").generic_string(),
++                                               {{"path", (root / "Shoot/Day1/b.JPG").generic_string()}, {"metadata", {{"captured_local", "2026-10-01T09:30:00"}, {"width", 4000}}}},
++                                               (root / "Shoot/c.tif").generic_string(), (root / "Shoot/missing.NEF").generic_string()}}});
+         CHECK_EQ(add["added"].get<int>(), 3);
+         CHECK(add["results"][3].contains("error"));
+-        Json again = c("images.add", {{"library", L}, {"items", {(root / "Shoot/c.tif").string()}}});
++        Json again = c("images.add", {{"library", L}, {"items", {(root / "Shoot/c.tif").generic_string()}}});
+         CHECK_EQ(again["added"].get<int>(), 0);
+         CHECK(again["results"][0]["existing"].get<bool>());
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+@@ -949,11 +1005,11 @@ static void synthetic() {
+         CHECK_EQ(c("images.list", {{"library", L}})["total"].get<int>(), 2);
+         CHECK_EQ(c("images.list", {{"library", L}, {"include_trashed", true}})["total"].get<int>(), 3);
+ 
+-        Json lk = c("images.lookup", {{"library", L}, {"paths", {(root / "Shoot/Day1/a.NEF").string(), (root / "Shoot/zzz").string()}}})["results"];
++        Json lk = c("images.lookup", {{"library", L}, {"paths", {(root / "Shoot/Day1/a.NEF").generic_string(), (root / "Shoot/zzz").generic_string()}}})["results"];
+         CHECK(lk[0]["found"].get<bool>());
+         CHECK(!lk[1]["found"].get<bool>());
+ 
+-        Json cp = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "Shoot/c.tif").string()}}});
++        Json cp = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "Shoot/c.tif").generic_string()}}});
+         std::string stored = cp["results"][0]["stored_at"];
+         CHECK(stored.find("Mine.spkcatalog/Originals/") != std::string::npos);
+         CHECK(fs::exists(stored));
+@@ -963,8 +1019,8 @@ static void synthetic() {
+         CHECK_EQ(c.err("collection.delete", {{"library", L}, {"collection", album}}), std::string(""));
+         CHECK_EQ(c("images.list", {{"library", L}, {"include_trashed", true}})["total"].get<int>(), 4);
+         c("library.close", {{"library", L}});
+-        CHECK_EQ(c.err("library.create", {{"path", (root / "Mine").string()}}), std::string("exists"));
+-        std::string L2 = c("library.open", {{"path", (root / "Mine.spkcatalog").string()}})["library"];
++        CHECK_EQ(c.err("library.create", {{"path", (root / "Mine").generic_string()}}), std::string("exists"));
++        std::string L2 = c("library.open", {{"path", (root / "Mine.spkcatalog").generic_string()}})["library"];
+         CHECK_EQ(c("library.info", {{"library", L2}})["counts"]["images"].get<int>(), 4);
+     });
+ 
+@@ -973,11 +1029,11 @@ static void synthetic() {
+         touch(root / "Shoot/a.NEF", "1");
+         touch(root / "App/Pairs/P1.spektrapair", "{}");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "Mine").string()}})["library"];
++        std::string L = c("library.create", {{"path", (root / "Mine").generic_string()}})["library"];
+         std::string album = c("collection.create", {{"library", L}, {"kind", "album"}, {"name", "Roll"}})["collection"];
+         Json add = c("images.add", {{"library", L}, {"recent_import", false}, {"collection", album},
+-                                    {"items", {(root / "Shoot/a.NEF").string(),
+-                                               {{"path", (root / "App/Pairs/P1.spektrapair").string()},
++                                    {"items", {(root / "Shoot/a.NEF").generic_string(),
++                                               {{"path", (root / "App/Pairs/P1.spektrapair").generic_string()},
+                                                 {"metadata", {{"captured_local", "2026-10-01T09:30:00"}, {"width", 6000}, {"height", 4000}}}}}}});
+         CHECK_EQ(add["added"].get<int>(), 2);
+         std::string a = add["results"][0]["image"], p = add["results"][1]["image"];
+@@ -999,7 +1055,7 @@ static void synthetic() {
+         CHECK_EQ(r["refused"][0]["code"].get<std::string>(), std::string("not_found"));
+         CHECK_EQ(c("images.list", {{"library", L}, {"include_removed", true}, {"include_trashed", true}})["total"].get<int>(), 1);
+         CHECK_EQ(find_by(c("collections.list", {{"library", L}})["collections"], "uuid", album)["image_count"].get<int>(), 1);
+-        CHECK(!c("images.lookup", {{"library", L}, {"paths", {(root / "App/Pairs/P1.spektrapair").string()}}})["results"][0]["found"].get<bool>());
++        CHECK(!c("images.lookup", {{"library", L}, {"paths", {(root / "App/Pairs/P1.spektrapair").generic_string()}}})["results"][0]["found"].get<bool>());
+         CHECK_EQ(c.err("images.remove", {{"library", L}, {"images", Json::array()}}), std::string("invalid_params"));
+     });
+ 
+@@ -1008,18 +1064,18 @@ static void synthetic() {
+         touch(root / "VolA/2026/x.NEF", "1");
+         touch(root / "VolA/2025/y.NEF", "2");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "R").string()}})["library"];
+-        c("images.add", {{"library", L}, {"items", {(root / "VolA/2026/x.NEF").string(), (root / "VolA/2025/y.NEF").string()}}});
++        std::string L = c("library.create", {{"path", (root / "R").generic_string()}})["library"];
++        c("images.add", {{"library", L}, {"items", {(root / "VolA/2026/x.NEF").generic_string(), (root / "VolA/2025/y.NEF").generic_string()}}});
+         fs::rename(root / "VolA", root / "VolA 1");
+         Json locs = c("locations.list", {{"library", L}})["locations"];
+         CHECK_EQ(locs.size(), size_t(2));
+         for (auto& l : locs) CHECK(!l["online"].get<bool>());
+-        std::string one = locs[0]["path"].get<std::string>() == (root / "VolA/2026").string() ? locs[0]["uuid"] : locs[1]["uuid"];
+-        Json rl = c("location.relink", {{"library", L}, {"location", one}, {"path", (root / "VolA 1/2026").string()}});
++        std::string one = locs[0]["path"].get<std::string>() == (root / "VolA/2026").generic_string() ? locs[0]["uuid"] : locs[1]["uuid"];
++        Json rl = c("location.relink", {{"library", L}, {"location", one}, {"path", (root / "VolA 1/2026").generic_string()}});
+         CHECK_EQ(rl["relinked"].size(), size_t(2));
+         Json im = c("images.list", {{"library", L}, {"check_files", true}})["images"];
+         for (auto& j : im) CHECK(j["exists"].get<bool>());
+-        CHECK_EQ(c.err("location.relink", {{"library", L}, {"location", one}, {"path", (root / "nowhere").string()}}), std::string("not_found"));
++        CHECK_EQ(c.err("location.relink", {{"library", L}, {"location", one}, {"path", (root / "nowhere").generic_string()}}), std::string("not_found"));
+         c("location.relink", {{"library", L}, {"location", one}, {"path", nullptr}});
+         CHECK(!c("image.get", {{"library", L}, {"image", im[0]["uuid"]}})["exists"].get<bool>() ||
+               !c("image.get", {{"library", L}, {"image", im[1]["uuid"]}})["exists"].get<bool>());
+@@ -1029,13 +1085,13 @@ static void synthetic() {
+         fs::path root = tmpdir("session");
+         touch(root / "card/DSC_1.NEF", "1");
+         Ctx c;
+-        Json cr = c("library.create", {{"path", (root / "Shoot 2026-10-18").string()}, {"kind", "session"}});
++        Json cr = c("library.create", {{"path", (root / "Shoot 2026-10-18").generic_string()}, {"kind", "session"}});
+         std::string L = cr["library"];
+         fs::path folder = root / "Shoot 2026-10-18";
+         CHECK(fs::exists(folder / "Shoot 2026-10-18.spksession"));
+         for (auto d : {"Capture", "Selects", "Output", "Trash"}) CHECK(fs::is_directory(folder / d));
+-        Json add = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "card/DSC_1.NEF").string()}}});
+-        CHECK_EQ(add["results"][0]["stored_at"].get<std::string>(), (folder / "Capture/DSC_1.NEF").string());
++        Json add = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "card/DSC_1.NEF").generic_string()}}});
++        CHECK_EQ(add["results"][0]["stored_at"].get<std::string>(), (folder / "Capture/DSC_1.NEF").generic_string());
+         c("edit.put", {{"library", L}, {"variant", add["results"][0]["variant"]}, {"base_revision", 0}, {"edit", {{"k", 1}}}});
+         Json locs = c("locations.list", {{"library", L}})["locations"];
+         CHECK_EQ(locs[0]["base"].get<std::string>(), std::string("library"));
+@@ -1045,12 +1101,12 @@ static void synthetic() {
+         // Move the folder: everything still resolves.
+         fs::rename(folder, root / "Moved");
+         fs::rename(root / "Moved/Shoot 2026-10-18.spksession", root / "Moved/Moved.spksession");
+-        std::string L2 = c("library.open", {{"path", (root / "Moved").string()}})["library"];
++        std::string L2 = c("library.open", {{"path", (root / "Moved").generic_string()}})["library"];
+         Json im = c("images.list", {{"library", L2}, {"check_files", true}})["images"];
+-        CHECK_EQ(im[0]["path"].get<std::string>(), (root / "Moved/Capture/DSC_1.NEF").string());
++        CHECK_EQ(im[0]["path"].get<std::string>(), (root / "Moved/Capture/DSC_1.NEF").generic_string());
+         CHECK(im[0]["exists"].get<bool>());
+         CHECK_EQ(c("edit.get", {{"library", L2}, {"variant", im[0]["variants"][0]["uuid"]}})["revision"].get<int>(), 1);
+-        CHECK_EQ(c.err("capture_one.link", {{"source", "/nowhere"}, {"path", (root / "Moved").string()}}), std::string("not_found"));
++        CHECK_EQ(c.err("capture_one.link", {{"source", "/nowhere"}, {"path", (root / "Moved").generic_string()}}), std::string("not_found"));
+     });
+ 
+     run("a session's folders: lock, move, restore, scan, trash hand-off", [] {
+@@ -1059,10 +1115,10 @@ static void synthetic() {
+         touch(root / "card/B.NEF", "b");
+         fs::path folder = root / "S";
+         Ctx c, other;
+-        std::string L = c("library.create", {{"path", folder.string()}, {"kind", "session"}})["library"];
+-        CHECK_EQ(other.err("library.open", {{"path", folder.string()}}), std::string("in_use"));
+-        CHECK_EQ(c("library.open", {{"path", folder.string()}})["library"].get<std::string>(), L);  // same process: same handle
+-        Json add = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "card/A.NEF").string(), (root / "card/B.NEF").string()}}});
++        std::string L = c("library.create", {{"path", folder.generic_string()}, {"kind", "session"}})["library"];
++        CHECK_EQ(other.err("library.open", {{"path", folder.generic_string()}}), std::string("in_use"));
++        CHECK_EQ(c("library.open", {{"path", folder.generic_string()}})["library"].get<std::string>(), L);  // same process: same handle
++        Json add = c("images.add", {{"library", L}, {"mode", "copy"}, {"items", {(root / "card/A.NEF").generic_string(), (root / "card/B.NEF").generic_string()}}});
+         std::string a = add["results"][0]["image"], b = add["results"][1]["image"];
+         Json roles = c("session.folders", {{"library", L}})["folders"];
+         int with_role = 0;
+@@ -1073,7 +1129,7 @@ static void synthetic() {
+         CHECK_EQ(mv["moved"].size(), size_t(1));
+         CHECK(fs::exists(folder / "Selects/A.NEF"));
+         CHECK(!fs::exists(folder / "Capture/A.NEF"));
+-        CHECK_EQ(c("image.get", {{"library", L}, {"image", a}})["path"].get<std::string>(), (folder / "Selects/A.NEF").string());
++        CHECK_EQ(c("image.get", {{"library", L}, {"image", a}})["path"].get<std::string>(), (folder / "Selects/A.NEF").generic_string());
+         // Never overwrites: a same-named file already in Trash is a conflict.
+         touch(folder / "Trash/B.NEF", "someone else's");
+         Json cf = c("session.move", {{"library", L}, {"images", {b}}, {"to", "trash"}});
+@@ -1106,34 +1162,38 @@ static void synthetic() {
+         c("library.close", {{"library", L}});
+         CHECK(!fs::exists(folder / "S.spksession-journal"));
+         {
+-            Db d((folder / "S.spksession").string(), Db::Mode::ReadWrite);
++            Db d((folder / "S.spksession").generic_string(), Db::Mode::ReadWrite);
+             auto s = d.prepare("SELECT i.id, l.id FROM image i, path_location l JOIN session_folder f ON f.location_id = l.id"
+                                " WHERE f.role = 'selects' AND i.file_name = 'C.NEF'");
+             CHECK(s.step());
+             d.exec("INSERT INTO fs_intent(op, image_id, from_path, to_path, to_location_id, at) VALUES ('move', " +
+-                   std::to_string(s.i64(0)) + ", '" + (folder / "Capture/C.NEF").string() + "', '" +
+-                   (folder / "Selects/C.NEF").string() + "', " + std::to_string(s.i64(1)) + ", 0)");
++                   std::to_string(s.i64(0)) + ", '" + (folder / "Capture/C.NEF").generic_string() + "', '" +
++                   (folder / "Selects/C.NEF").generic_string() + "', " + std::to_string(s.i64(1)) + ", 0)");
+         }
+         fs::rename(folder / "Capture/C.NEF", folder / "Selects/C.NEF");
+-        std::string L2 = c("library.open", {{"path", folder.string()}})["library"];
++        std::string L2 = c("library.open", {{"path", folder.generic_string()}})["library"];
+         Json im = c("images.list", {{"library", L2}, {"check_files", true}})["images"];
+         for (auto& j : im) CHECK(j["exists"].get<bool>());
+-        CHECK(!find_by(im, "path", (folder / "Selects/C.NEF").string()).is_null());
++        CHECK(!find_by(im, "path", (folder / "Selects/C.NEF").generic_string()).is_null());
+         // A catalog has no session folders.
+-        std::string cat = c("library.create", {{"path", (root / "Cat").string()}})["library"];
++        std::string cat = c("library.create", {{"path", (root / "Cat").generic_string()}})["library"];
+         CHECK_EQ(c.err("session.move", {{"library", cat}, {"images", Json::array()}, {"to", "trash"}}), std::string("invalid_params"));
+     });
+ 
+     run("lookup matches a path in either Unicode normalisation", [] {
++#if !defined(__APPLE__) && !defined(_WIN32)
++        std::printf("   skipped: NFC is the identity off Apple and Windows (docs/DESIGN.md)\n");
++        return;
++#endif
+         fs::path root = tmpdir("nfc");
+         std::string nfd = "Cafe\xCC\x81";   // e + combining acute
+         std::string nfc = "Caf\xC3\xA9";    // é
+         touch(root / nfd / "x.NEF", "1");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "U").string()}})["library"];
+-        c("images.add", {{"library", L}, {"items", {(root / nfd / "x.NEF").string()}}});
+-        CHECK(c("images.lookup", {{"library", L}, {"paths", {(root / nfc / "x.NEF").string()}}})["results"][0]["found"].get<bool>());
+-        CHECK(c("images.lookup", {{"library", L}, {"paths", {(root / nfd / "x.NEF").string()}}})["results"][0]["found"].get<bool>());
++        std::string L = c("library.create", {{"path", (root / "U").generic_string()}})["library"];
++        c("images.add", {{"library", L}, {"items", {(root / nfd / "x.NEF").generic_string()}}});
++        CHECK(c("images.lookup", {{"library", L}, {"paths", {(root / nfc / "x.NEF").generic_string()}}})["results"][0]["found"].get<bool>());
++        CHECK(c("images.lookup", {{"library", L}, {"paths", {(root / nfd / "x.NEF").generic_string()}}})["results"][0]["found"].get<bool>());
+     });
+ 
+     run("a watched folder keeps in step: new, moved, gone, back, offline", [] {
+@@ -1145,8 +1205,8 @@ static void synthetic() {
+         touch(root / "Card/.Trashes/D.NEF", "hidden");
+         touch(root / "Card/CaptureOne/Cache/E.jpg", "a cache");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "W").string()}})["library"];
+-        Json fa = c("folders.add", {{"library", L}, {"path", (root / "Card").string()}, {"skip", {"CaptureOne"}}});
++        std::string L = c("library.create", {{"path", (root / "W").generic_string()}})["library"];
++        Json fa = c("folders.add", {{"library", L}, {"path", (root / "Card").generic_string()}, {"skip", {"CaptureOne"}}});
+         CHECK_EQ(fa["sync"]["added"].get<int>(), 3);
+         CHECK_EQ(fa["sync"]["offline"].get<bool>(), false);
+         CHECK(fa["sync"].contains("recent_import"));  // the first look is an import
+@@ -1170,7 +1230,7 @@ static void synthetic() {
+         CHECK(!s1["folders"][0].contains("recent_import"));  // a later sync is not an import
+         // The row followed the file: same image, same rating.
+         Json ai = c("image.get", {{"library", L}, {"image", a}});
+-        CHECK_EQ(ai["path"].get<std::string>(), (root / "Card/DCIM/102/A.NEF").string());
++        CHECK_EQ(ai["path"].get<std::string>(), (root / "Card/DCIM/102/A.NEF").generic_string());
+         CHECK_EQ(ai["variants"][0]["rating"].get<int>(), 4);
+         CHECK_EQ(c("images.list", {{"library", L}})["total"].get<int>(), 3);
+         Json removed = c("images.list", {{"library", L}, {"include_removed", true}})["images"];
+@@ -1211,8 +1271,8 @@ static void synthetic() {
+         CHECK(!find_by(cols, "title", "Card").is_null());
+         CHECK(!find_by(cols, "title", "102").is_null());
+         CHECK(find_by(cols, "title", "CaptureOne").is_null());
+-        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", (root / "W.spkcatalog/Originals").string()}}), std::string("not_found"));
+-        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", (root / "W.spkcatalog").string()}}), std::string("invalid_params"));
++        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", (root / "W.spkcatalog/Originals").generic_string()}}), std::string("not_found"));
++        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", (root / "W.spkcatalog").generic_string()}}), std::string("invalid_params"));
+         c("folders.remove", {{"library", L}, {"folder", fl[0]["folder"]}});
+         CHECK_EQ(c("folders.list", {{"library", L}})["folders"].size(), size_t(0));
+         CHECK_EQ(c("images.list", {{"library", L}})["total"].get<int>(), 5);  // the images stay
+@@ -1221,7 +1281,7 @@ static void synthetic() {
+     run("a session keeps its own folder in step", [] {
+         fs::path root = tmpdir("watch-session");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "S").string()}, {"kind", "session"}})["library"];
++        std::string L = c("library.create", {{"path", (root / "S").generic_string()}, {"kind", "session"}})["library"];
+         touch(root / "S/Capture/A.NEF", "a");
+         touch(root / "S/Selects/B.NEF", "b");
+         Json s = c("folders.sync", {{"library", L}});
+@@ -1238,8 +1298,8 @@ static void synthetic() {
+         fs::path root = tmpdir("watch-c1");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
+-        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", fc.photos.string()}}), std::string("read_only"));
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
++        CHECK_EQ(c.err("folders.add", {{"library", L}, {"path", fc.photos.generic_string()}}), std::string("read_only"));
+         CHECK_EQ(c.err("folders.sync", {{"library", L}}), std::string("read_only"));
+         // Its tree is Capture One's only: one root, no SpektraLab rows beside it.
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+@@ -1257,7 +1317,7 @@ static void synthetic() {
+         fs::path root = tmpdir("facets");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         Json f = c("images.facets", {{"library", L}});
+         // Four visible images (C is in Capture One's trash).
+         CHECK_EQ(f["total"].get<int>(), 4);
+@@ -1290,8 +1350,8 @@ static void synthetic() {
+         touch(root / "P/A.NEF", "a");
+         FakeCatalog fc(root);
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "D").string()}})["library"];
+-        Json fa = c("folders.add", {{"library", L}, {"path", (root / "P").string()}});
++        std::string L = c("library.create", {{"path", (root / "D").generic_string()}})["library"];
++        Json fa = c("folders.add", {{"library", L}, {"path", (root / "P").generic_string()}});
+         Json f0 = c("images.facets", {{"library", L}});
+         CHECK_EQ(f0["undescribed"].get<int>(), 1);
+         std::string a = c("images.list", {{"library", L}, {"filter", {{"described", false}}}})["images"][0]["uuid"];
+@@ -1302,7 +1362,7 @@ static void synthetic() {
+         CHECK_EQ(f1["undescribed"].get<int>(), 0);
+         CHECK_EQ(find_by(f1["lens"], "value", "NIKKOR Z 24-120mm f/4 S")["count"].get<int>(), 1);
+         CHECK_EQ(c("images.list", {{"library", L}, {"full", true}})["images"][0]["captured_local"].get<std::string>(), std::string("2026-10-03T16:53:00"));
+-        std::string M = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
++        std::string M = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         Json r = c("images.describe", {{"library", M}, {"items", {{{"image", "IMG-A"}, {"metadata", {{"lens", "x"}}}}}}});
+         CHECK_EQ(r["updated"].get<int>(), 0);
+         CHECK_EQ(r["results"][0]["error"]["code"].get<std::string>(), std::string("read_only"));
+@@ -1313,12 +1373,12 @@ static void synthetic() {
+         touch(root / "a.NEF", "a");
+         touch(root / "b.NEF", "b");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "R").string()}})["library"];
++        std::string L = c("library.create", {{"path", (root / "R").generic_string()}})["library"];
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+         Json ri = find_by(cols, "kind", "recent_imports");
+         CHECK(!ri.is_null());
+         CHECK(!ri["editable"].get<bool>());
+-        Json add = c("images.add", {{"library", L}, {"items", {(root / "a.NEF").string(), (root / "b.NEF").string()}}});
++        Json add = c("images.add", {{"library", L}, {"items", {(root / "a.NEF").generic_string(), (root / "b.NEF").generic_string()}}});
+         std::string album = add["recent_import"];
+         cols = c("collections.list", {{"library", L}})["collections"];
+         Json al = find_by(cols, "uuid", album);
+@@ -1327,7 +1387,7 @@ static void synthetic() {
+         CHECK_EQ(find_by(cols, "kind", "recent_imports")["image_count"].get<int>(), 2);
+         CHECK_EQ(c("images.list", {{"library", L}, {"collection", album}})["total"].get<int>(), 2);
+         // Adding the same files again is no import.
+-        CHECK(!c("images.add", {{"library", L}, {"items", {(root / "a.NEF").string()}}}).contains("recent_import"));
++        CHECK(!c("images.add", {{"library", L}, {"items", {(root / "a.NEF").generic_string()}}}).contains("recent_import"));
+     });
+ 
+     run("an import into a Capture One mirror is a Recent Imports album of SpektraLab's, and outlives a sync", [] {
+@@ -1336,8 +1396,8 @@ static void synthetic() {
+         touch(root / "New/x.NEF", "x");
+         touch(root / "New/y.NEF", "y");
+         Ctx c;
+-        std::string L = c("capture_one.link", {{"source", fc.package.string()}, {"path", (root / "M").string()}})["library"];
+-        Json add = c("images.add", {{"library", L}, {"items", {(root / "New/x.NEF").string(), (root / "New/y.NEF").string()}}});
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
++        Json add = c("images.add", {{"library", L}, {"items", {(root / "New/x.NEF").generic_string(), (root / "New/y.NEF").generic_string()}}});
+         CHECK(add.contains("recent_import"));
+         std::string album = add["recent_import"];
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+@@ -1349,7 +1409,7 @@ static void synthetic() {
+         CHECK_EQ(mine["origin"].get<std::string>(), std::string("local"));
+         // A second import goes under the same row of SpektraLab's: one is made, once.
+         touch(root / "New/z.NEF", "z");
+-        std::string album2 = c("images.add", {{"library", L}, {"items", {(root / "New/z.NEF").string()}}})["recent_import"];
++        std::string album2 = c("images.add", {{"library", L}, {"items", {(root / "New/z.NEF").generic_string()}}})["recent_import"];
+         cols = c("collections.list", {{"library", L}})["collections"];
+         CHECK_EQ(find_by(cols, "uuid", album2)["parent"].get<std::string>(), mine["uuid"].get<std::string>());
+         int ours = 0;
+@@ -1359,52 +1419,52 @@ static void synthetic() {
+         c("library.sync", {{"library", L}, {"force", true}});
+         CHECK_EQ(c("images.list", {{"library", L}, {"collection", album}})["total"].get<int>(), 2);
+         CHECK_EQ(c("images.list", {{"library", L}, {"collection", album2}})["total"].get<int>(), 1);
+-        CHECK(!fs::exists(fc.db.string() + "-journal"));
++        CHECK(!fs::exists(fc.db.generic_string() + "-journal"));
+     });
+ 
+     run("a schema-1 library is migrated forward on open", [] {
+         fs::path root = tmpdir("migrate");
+         touch(root / "P/a.NEF", "a");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "Old").string()}})["library"];
+-        c("images.add", {{"library", L}, {"items", {(root / "P/a.NEF").string()}}, {"recent_import", false}});
++        std::string L = c("library.create", {{"path", (root / "Old").generic_string()}})["library"];
++        c("images.add", {{"library", L}, {"items", {(root / "P/a.NEF").generic_string()}}, {"recent_import", false}});
+         c("library.close", {{"library", L}});
+         {
+             // Back to what spklib 0.1.0 wrote: schema 1, no fixed rows.
+-            Db d((root / "Old.spkcatalog/Library.spkdb").string(), Db::Mode::ReadWrite);
++            Db d((root / "Old.spkcatalog/Library.spkdb").generic_string(), Db::Mode::ReadWrite);
+             d.exec("DROP TABLE copy_member; DROP TABLE copy_source;"
+                    " DROP INDEX image_captured; DROP INDEX variant_keyword_keyword; DROP TABLE variant_keyword; DROP TABLE watched_folder;"
+                    " ALTER TABLE collection DROP COLUMN origin_created_at; ALTER TABLE image DROP COLUMN described_at;"
+                    " DELETE FROM collection WHERE kind IN ('root', 'all_images', 'recent_imports', 'trash', 'in_library');"
+                    " UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+         }
+-        std::string L2 = c("library.open", {{"path", (root / "Old.spkcatalog").string()}})["library"];
++        std::string L2 = c("library.open", {{"path", (root / "Old.spkcatalog").generic_string()}})["library"];
+         CHECK_EQ(c("library.info", {{"library", L2}})["schema_version"].get<int>(), 3);
+         Json cols = c("collections.list", {{"library", L2}})["collections"];
+         CHECK(!find_by(cols, "kind", "all_images").is_null());
+         CHECK_EQ(find_by(cols, "kind", "all_images")["image_count"].get<int>(), 1);
+         CHECK_EQ(c("images.facets", {{"library", L2}})["total"].get<int>(), 1);
+-        c("folders.add", {{"library", L2}, {"path", (root / "P").string()}});
++        c("folders.add", {{"library", L2}, {"path", (root / "P").generic_string()}});
+         CHECK_EQ(c("images.list", {{"library", L2}})["total"].get<int>(), 1);  // the same file, not twice
+     });
+ 
+     run("a schema-2 library is migrated to 3 on open", [] {
+         fs::path root = tmpdir("migrate-3");
+         Ctx c;
+-        std::string L = c("library.create", {{"path", (root / "Two").string()}})["library"];
++        std::string L = c("library.create", {{"path", (root / "Two").generic_string()}})["library"];
+         c("library.close", {{"library", L}});
+         {
+             // What spklib 0.2.x wrote: no copy tables.
+-            Db d((root / "Two.spkcatalog/Library.spkdb").string(), Db::Mode::ReadWrite);
++            Db d((root / "Two.spkcatalog/Library.spkdb").generic_string(), Db::Mode::ReadWrite);
+             d.exec("DROP TABLE copy_member; DROP TABLE copy_source; UPDATE meta SET value = '2' WHERE key = 'schema_version'");
+         }
+-        std::string L2 = c("library.open", {{"path", (root / "Two.spkcatalog").string()}})["library"];
++        std::string L2 = c("library.open", {{"path", (root / "Two.spkcatalog").generic_string()}})["library"];
+         Json info = c("library.info", {{"library", L2}});
+         CHECK_EQ(info["schema_version"].get<int>(), 3);
+         CHECK(info["copied_from"].is_null());
+         // Not a copy: an update is refused as read-only (and the tables are there to ask).
+         CHECK_EQ(c.err("capture_one.update", {{"library", L2}}), std::string("read_only"));
+-        Db d((root / "Two.spkcatalog/Library.spkdb").string(), Db::Mode::ReadWrite);
++        Db d((root / "Two.spkcatalog/Library.spkdb").generic_string(), Db::Mode::ReadWrite);
+         CHECK(d.has_table("copy_source"));
+         CHECK(d.has_table("copy_member"));
+     });
+@@ -1430,18 +1490,163 @@ static void synthetic() {
+     });
+ }
+ 
++
++// --- the platform layer, and what a Windows catalog looks like ------------------------------------
++
++static void platform_port() {
++    namespace pf = spklib::platform;
++
++    run("paths: roots, trailing separators, separators", [] {
++        CHECK_EQ(pf::root_length("/"), size_t(1));
++        CHECK_EQ(pf::root_length("/Volumes/X"), size_t(1));
++        CHECK_EQ(pf::root_length("relative/x"), size_t(0));
++        CHECK_EQ(pf::strip_trailing_separators("/"), std::string("/"));
++        CHECK_EQ(pf::strip_trailing_separators("/a/b//"), std::string("/a/b"));
++        CHECK_EQ(pf::strip_trailing_separators("/Volumes/NIKON Z 8   "), std::string("/Volumes/NIKON Z 8   "));
++#ifdef _WIN32
++        CHECK_EQ(pf::root_length("C:/"), size_t(3));
++        CHECK_EQ(pf::root_length("C:/Users/x"), size_t(3));
++        CHECK_EQ(pf::root_length("//server/share/Photos"), size_t(15));
++        CHECK_EQ(pf::strip_trailing_separators("C:/"), std::string("C:/"));
++        CHECK_EQ(pf::strip_trailing_separators("C:/Photos/"), std::string("C:/Photos"));
++        CHECK_EQ(pf::to_spklib_separators("Users\\Sizhi\\Desktop"), std::string("Users/Sizhi/Desktop"));
++        CHECK_EQ(pf::path_string(fs::path("C:\\Users\\x\\A.NEF")), std::string("C:/Users/x/A.NEF"));
++        CHECK(pf::utf8_code_page());  // the manifest is embedded
++#else
++        CHECK_EQ(pf::to_spklib_separators("a\\b"), std::string("a\\b"));  // a legal character here
++#endif
++    });
++
++    run("a Capture One location resolves with this platform's root", [] {
++        spklib::c1::PathLocation win;  // as Capture One 16.6 for Windows writes it
++        win.win_root = "C:\\";
++        win.mac_root = "";
++        win.relative_path = spklib::platform::to_spklib_separators("Users\\me\\Pictures\\Day 1");
++        win.root = spklib::c1::platform_root(win);
++        spklib::c1::PathLocation mac;  // as Capture One for Mac writes it
++        mac.mac_root = "/Volumes/NIKON Z 8   ";
++        mac.relative_path = "DCIM/100NZ8";
++        mac.root = spklib::c1::platform_root(mac);
++        spklib::c1::PathLocation drive_root = win;
++        drive_root.relative_path = "";
++#ifdef _WIN32
++        CHECK_EQ(spklib::c1::resolve(win, "C:/x.cocatalog"), std::string("C:/Users/me/Pictures/Day 1"));
++        CHECK_EQ(spklib::c1::resolve(drive_root, "C:/x.cocatalog"), std::string("C:/"));
++        // A catalog made on a Mac keeps its Mac roots: offline here, never guessed.
++        CHECK_EQ(spklib::c1::resolve(mac, "C:/x.cocatalog"), std::string("/Volumes/NIKON Z 8   /DCIM/100NZ8"));
++#else
++        // Off Windows ZMACROOT is the root, exactly as before the port.
++        CHECK_EQ(spklib::c1::resolve(mac, "/x.cocatalog"), std::string("/Volumes/NIKON Z 8   /DCIM/100NZ8"));
++        CHECK_EQ(win.root, std::string(""));
++#endif
++    });
++
++    run("the snapshot copy: every byte, and on Windows the lock-byte page as zeros", [] {
++        fs::path root = tmpdir("lockpage");
++        std::string src = (root / "src.db").generic_string(), dst = (root / "dst.db").generic_string();
++        {
++            Db d(src, Db::Mode::Create);
++            d.exec("PRAGMA page_size = 4096");
++            d.exec("CREATE TABLE t(x BLOB)");
++            for (int i = 0; i < 8; ++i) d.exec("INSERT INTO t VALUES (randomblob(3000))");
++        }
++        std::string before = read_file(src);
++        CHECK(before.size() >= 5 * 4096);
++        const int64_t lock_at = 8192;  // stands in for 1 GiB
++#ifdef _WIN32
++        // Hold the page the way Capture One's SQLite would hold its lock bytes:
++        // an exclusive lock, which makes every other handle's read fail.
++        HANDLE h = CreateFileW(fs::path(src).wstring().c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
++                               nullptr, OPEN_EXISTING, 0, nullptr);
++        CHECK(h != INVALID_HANDLE_VALUE);
++        OVERLAPPED ov{};
++        ov.Offset = DWORD(lock_at);
++        CHECK(LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 4096, 0, &ov) != 0);
++        {
++            // The lock is real: an ordinary read of those bytes fails.
++            std::ifstream probe(fs::path(src), std::ios::binary);
++            std::string all{std::istreambuf_iterator<char>(probe), std::istreambuf_iterator<char>()};
++            CHECK(all.size() < before.size());
++        }
++#endif
++        int64_t n = spklib::c1::detail::copy_database_file(src, dst, lock_at);
++#ifdef _WIN32
++        UnlockFileEx(h, 0, 4096, 0, &ov);
++        CloseHandle(h);
++#endif
++        std::string after = read_file(dst);
++        CHECK_EQ(n, int64_t(before.size()));
++        CHECK_EQ(after.size(), before.size());
++#ifdef _WIN32
++        CHECK(after.compare(0, size_t(lock_at), before, 0, size_t(lock_at)) == 0);
++        CHECK(after.substr(size_t(lock_at), 4096) == std::string(4096, '\0'));
++        CHECK(after.compare(size_t(lock_at) + 4096, std::string::npos, before, size_t(lock_at) + 4096, std::string::npos) == 0);
++#else
++        CHECK(after == before);
++#endif
++    });
++
++    run("rename never replaces a file that is already there", [] {
++#if !defined(__APPLE__) && !defined(_WIN32)
++        std::printf("   skipped: Linux rename(2) replaces; Linux is not shipped (platform.hpp)\n");
++        return;
++#endif
++        fs::path root = tmpdir("rename");
++        touch(root / "a.NEF", "aaa");
++        touch(root / "b.NEF", "bbb");
++        std::string why;
++        CHECK_EQ(pf::rename_no_replace((root / "a.NEF").generic_string(), (root / "b.NEF").generic_string(), &why), EEXIST);
++        CHECK_EQ(read_file(root / "b.NEF"), std::string("bbb"));
++        CHECK_EQ(read_file(root / "a.NEF"), std::string("aaa"));
++        CHECK_EQ(pf::rename_no_replace((root / "a.NEF").generic_string(), (root / "c.NEF").generic_string(), &why), 0);
++        CHECK(fs::exists(root / "c.NEF") && !fs::exists(root / "a.NEF"));
++        CHECK_EQ(pf::rename_no_replace((root / "gone.NEF").generic_string(), (root / "d.NEF").generic_string(), &why), ENOENT);
++    });
++
++    run("a catalog in a folder with a non-ASCII name: probe, link, every file found", [] {
++        fs::path root = tmpdir("非 ASCII 目录 é");
++        FakeCatalog fc(root);
++        auto before = census(fc.package);
++        Ctx c;
++        CHECK(c("capture_one.probe", {{"path", fc.package.generic_string()}})["supported"].get<bool>());
++        std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "镜像").generic_string()}})["library"];
++        Json all = c("images.list", {{"library", L}, {"check_files", true}, {"include_trashed", true}})["images"];
++        CHECK_EQ(all.size(), size_t(5));
++        for (auto& im : all) CHECK(im["exists"].get<bool>());
++        CHECK_EQ(find_by(all, "uuid", "IMG-A")["path"].get<std::string>(), (fc.photos / "A.NEF").generic_string());
++        CHECK(before == census(fc.package));
++    });
++}
++
+ // --- part 2: the real catalog ----------------------------------------------------------------------
+ 
++/// The root an absolute location resolves with, written again here: ZMACROOT;
++/// on Windows ZWINROOT ("C:\\") when Capture One wrote one.
++static std::string oracle_root(const std::string& mac, const std::string& win) {
++#ifdef _WIN32
++    std::string r = win.empty() ? mac : win;
++    for (auto& ch : r) if (ch == '\\') ch = '/';
++    return r;
++#else
++    (void)win;
++    return mac;
++#endif
++}
++
+ static std::string oracle_resolve(bool relative, const std::string& root, const std::string& rel, const std::string& package) {
+     // Written again here, independently of the SDK, from the dump in
+     // docs/CAPTURE-ONE-CATALOG.md: root + "/" + relative path, relative to the
+-    // package when ZISRELATIVE.
++    // package when ZISRELATIVE. Windows writes '\\' in the relative path.
+     std::string r = rel;
++#ifdef _WIN32
++    for (auto& ch : r) if (ch == '\\') ch = '/';
++#endif
+     while (!r.empty() && r[0] == '/') r.erase(0, 1);
+     std::string b = relative ? package : root;
+     while (b.size() > 1 && b.back() == '/') b.pop_back();
++    if (b.size() == 2 && b[1] == ':') b += '/';  // "C:/", not "C:"
+     if (r.empty()) return b;
+-    return b == "/" ? "/" + r : b + "/" + r;
++    return b.back() == '/' ? b + r : b + "/" + r;
+ }
+ 
+ static void real_catalog(const std::string& package) {
+@@ -1456,15 +1661,21 @@ static void real_catalog(const std::string& package) {
+     fs::path dbfile;
+     for (auto& e : fs::directory_iterator(package))
+         if (e.path().extension() == ".cocatalogdb") dbfile = e.path();
+-    fs::copy_file(dbfile, oracle_dir / "copy.db");
+-    Db o((oracle_dir / "copy.db").string(), Db::Mode::ReadOnlyImmutable);
++    {
++        // Bytes, not fs::copy_file: on Windows CopyFile cannot open a file
++        // Capture One has open for writing.
++        std::ifstream in(dbfile, std::ios::binary);
++        std::ofstream out(oracle_dir / "copy.db", std::ios::binary);
++        out << in.rdbuf();
++    }
++    Db o((oracle_dir / "copy.db").generic_string(), Db::Mode::ReadOnlyImmutable);
+ 
+     fs::path root = tmpdir("real");
+     Ctx c;
+     Json r;
+     run("link the real catalog", [&] {
+         auto a = std::chrono::steady_clock::now();
+-        r = c("capture_one.link", {{"source", package}, {"path", (root / "Real").string()}});
++        r = c("capture_one.link", {{"source", package}, {"path", (root / "Real").generic_string()}});
+         std::printf("   link: %.2f s %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - a).count(),
+                     r["sync"]["ms"].dump().c_str());
+         auto n = [&](const char* sql) { auto s = o.prepare(sql); s.step(); return s.i64(0); };
+@@ -1482,7 +1693,7 @@ static void real_catalog(const std::string& package) {
+         for (auto& j : all) by_uuid[j["uuid"]] = j;
+         auto s = o.prepare(
+             "SELECT i.ZIMAGEUUID, p.ZISRELATIVE, p.ZMACROOT, p.ZRELATIVEPATH, i.ZIMAGEFILENAME, i.ZISTRASHED,"
+-            " strftime('%Y-%m-%dT%H:%M:%S', i.ZEXP_DATE, 'unixepoch'), i.ZWIDTH, i.ZCAMERA_MODEL"
++            " strftime('%Y-%m-%dT%H:%M:%S', i.ZEXP_DATE, 'unixepoch'), i.ZWIDTH, i.ZCAMERA_MODEL, p.ZWINROOT"
+             " FROM ZIMAGE i JOIN ZPATHLOCATION p ON p.Z_PK = i.ZIMAGELOCATION");
+         int64_t n = 0, exist_sdk = 0, exist_oracle = 0, path_mismatch = 0, time_mismatch = 0, other = 0;
+         while (s.step()) {
+@@ -1490,12 +1701,12 @@ static void real_catalog(const std::string& package) {
+             auto it = by_uuid.find(s.text(0));
+             if (it == by_uuid.end()) { ++other; continue; }
+             const Json& j = it->second;
+-            std::string want = oracle_resolve(s.i64(1) != 0, s.text(2), s.text(3), package) + "/" + s.text(4);
++            std::string want = oracle_resolve(s.i64(1) != 0, oracle_root(s.text(2), s.text(9)), s.text(3), package) + "/" + s.text(4);
+             if (j["path"].get<std::string>() != want) {
+                 if (++path_mismatch <= 3) std::fprintf(stderr, "   path %s vs %s\n", j["path"].get<std::string>().c_str(), want.c_str());
+             }
+-            struct stat st {};
+-            exist_oracle += ::stat(want.c_str(), &st) == 0;
++            std::error_code ec;
++            exist_oracle += fs::exists(fs::path(want), ec);
+             exist_sdk += j["exists"].get<bool>();
+             std::string t = s.is_null(6) ? "" : s.text(6);
+             std::string got = j["captured_local"].is_null() ? "" : j["captured_local"].get<std::string>();
+@@ -1660,7 +1871,7 @@ static void real_catalog(const std::string& package) {
+     std::string CL;
+     run("copy the real catalog: counts against an independent reading", [&] {
+         auto a = std::chrono::steady_clock::now();
+-        Json cr = c("capture_one.copy", {{"source", package}, {"path", copy_path.string()}});
++        Json cr = c("capture_one.copy", {{"source", package}, {"path", copy_path.generic_string()}});
+         double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - a).count();
+         CL = cr["library"];
+         Json rep = cr["report"];
+@@ -1690,13 +1901,13 @@ static void real_catalog(const std::string& package) {
+         Json all = c("images.list", {{"library", CL}, {"include_trashed", true}})["images"];
+         std::map<std::string, Json> by_uuid;
+         for (auto& j : all) by_uuid[j["uuid"]] = j;
+-        auto q = o.prepare("SELECT i.ZIMAGEUUID, p.ZISRELATIVE, p.ZMACROOT, p.ZRELATIVEPATH, i.ZIMAGEFILENAME, i.ZISTRASHED"
++        auto q = o.prepare("SELECT i.ZIMAGEUUID, p.ZISRELATIVE, p.ZMACROOT, p.ZRELATIVEPATH, i.ZIMAGEFILENAME, i.ZISTRASHED, p.ZWINROOT"
+                            " FROM ZIMAGE i JOIN ZPATHLOCATION p ON p.Z_PK = i.ZIMAGELOCATION");
+         int64_t bad = 0;
+         while (q.step()) {
+             auto it = by_uuid.find(q.text(0));
+             if (it == by_uuid.end() ||
+-                it->second["path"] != oracle_resolve(q.i64(1) != 0, q.text(2), q.text(3), package) + "/" + q.text(4) ||
++                it->second["path"] != oracle_resolve(q.i64(1) != 0, oracle_root(q.text(2), q.text(6)), q.text(3), package) + "/" + q.text(4) ||
+                 it->second["trashed"].get<bool>() != (q.i64(5) != 0) || it->second["origin"] != "local") ++bad;
+         }
+         CHECK_EQ(bad, int64_t(0));
+@@ -1780,7 +1991,8 @@ int main() {
+     g_tmp = fs::temp_directory_path() / ("spklib-tests-" + std::to_string(::getpid()));
+     fs::create_directories(g_tmp);
+     synthetic();
+-    if (const char* real = std::getenv("SPKLIB_C1_CATALOG")) real_catalog(real);
++    platform_port();
++    if (const char* real = std::getenv("SPKLIB_C1_CATALOG")) real_catalog(spklib::platform::path_string(fs::path(real)));
+     else std::printf("-- SPKLIB_C1_CATALOG not set: the real-catalog pass is skipped\n");
+     fs::remove_all(g_tmp);
+     std::printf("\n%d passed, %d failed\n", g_passed, g_failed);
+-- 
+2.43.0
+

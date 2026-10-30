@@ -131,8 +131,9 @@
 | `desktop.yml` / `package-linux` | ubuntu-24.04 | `.deb` + AppImage |
 | `desktop.yml` / `package-windows` | windows-latest | 真实 Windows 上宿主回应 `hello`；NSIS 安装包；静默安装后再问已安装的宿主 |
 | `build.yml` / `build` | macos-26 | macOS 应用能否从干净检出编译（只在手动触发时运行：本 fork 的来源 evanfan005-bit/SpektraLab-Windows 在 `aed5fd9` 把它改为手动，这里沿用） |
+| `spklib-windows.yml` / `build-test` | windows-latest | 图库辅助程序：把 `vendor/spklib/windows/patches` 应用到 spklib `BASE`，用固定版本的 llvm-mingw 与 SQLite 构建并跑 spklib 的测试，release 构建上传为产物；入库了 exe 之后还要逐字节一致（RFC-W002）。只在 `vendor/spklib/**` 或该工作流改动时运行 |
 
-**触发**：`process.yml` 对所有分支的推送和所有 PR 运行；`desktop.yml` 对 `windows2` 的推送、所有 PR 和手动触发运行（其他分支的推送不触发：`aed5fd9` 把它改成了只手动，本 fork 只为 `windows2` 与 PR 加回自动触发）；`build.yml` 只手动触发。fork 默认不启用 Actions，要在仓库的 Actions 页面启用一次。
+**触发**：`process.yml` 对所有分支的推送和所有 PR 运行；`desktop.yml` 对 `windows2` 的推送、所有 PR 和手动触发运行（其他分支的推送不触发：`aed5fd9` 把它改成了只手动，本 fork 只为 `windows2` 与 PR 加回自动触发）；`build.yml` 只手动触发。fork 默认不启用 Actions，要在仓库的 Actions 页面启用一次；`spklib-windows.yml` 对 `windows2` 上改动 `vendor/spklib/**` 的推送、相应的 PR 和手动触发运行。
 
 **CI 回答不了的问题**（需要人工或专用机器）：真实 GPU 上的渲染（托管的 Windows 机器没有 Vulkan 驱动，`host_hello.py` 接受 `backend.available:false`）、Vulkan 与 Metal 的整图对照（需要 Mac）、相机 RAW（夹具不入库）、真实显示器的 ICC / 广色域 / HDR / 高 DPI、安装包签名（目前未签名）。这些写进 PR 的“人工验证”一栏。
 

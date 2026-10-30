@@ -1,0 +1,101 @@
+From 8dfbf3a6bb03b8e77824d5308890978c9cff9091 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 23:28:32 -0500
+Subject: [PATCH 2/3] fix(capture_one): ZPARENT -1 is Capture One for Windows'
+ "no parent" -- no root that is its own parent
+
+Capture One 16.6.4 for Windows writes ZPARENT = -1 on the root
+ProjectCollection, All Images, Trash, In Catalog, its own albums at the top
+and the top folder, where a Mac catalog has NULL or the root. A sync and a
+copy took -1 for a parent row that was gone: they counted each one as a
+repair, and placed the root under the root -- a collection that is its own
+parent, a cycle in collections.list.
+
+Now -1 is placed exactly as a gone parent is (non-folders under the root,
+a folder under the nearest folder above it by path), the root is never its
+own parent, and -1 is not counted in parents_repaired. A Mac catalog reads
+as before.
+
+Test: "ZPARENT -1, as Capture One for Windows writes it" (link and copy).
+Red before: on the previous commit it fails 3 checks -- parents_repaired 4
+!= 1 for link and for copy, and COL-ROOT's parent is not null.
+Gate: Linux spklib-tests -- 540 passed, 0 failed (the new test included).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ src/library.cpp | 11 +++++++----
+ tests/tests.cpp | 24 ++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/src/library.cpp b/src/library.cpp
+index c45f649..35610af 100644
+--- a/src/library.cpp
++++ b/src/library.cpp
+@@ -984,10 +984,13 @@ Json Library::sync(const Json& options) {
+                                 parent = col_id[pk];
+                             }
+                         }
+-                    } else if (cat.root_collection && col_id.count(cat.root_collection)) {
++                    } else if (cat.root_collection && col_id.count(cat.root_collection) && co.pk != cat.root_collection) {
+                         parent = col_id[cat.root_collection];
+                     }
+-                    ++repaired;
++                    // Capture One for Windows writes -1 where the Mac writes
++                    // NULL or the root: placed the same way, but not a row
++                    // that went.
++                    if (*co.parent >= 0) ++repaired;
+                 }
+                 setp.bind(1, parent).bind(2, col_id[co.pk]);
+                 setp.run();
+@@ -3354,10 +3357,10 @@ Json Library::merge_capture_one(const c1::Catalog& cat, const std::string& packa
+                     size_t best = 0;
+                     for (auto& [d, pk] : folder_dirs)
+                         if (pk != co.pk && is_prefix_dir(d, mine) && d.size() >= best) { best = d.size(); parent = pk; }
+-                } else if (cat.root_collection && col_by_pk.count(cat.root_collection)) {
++                } else if (cat.root_collection && col_by_pk.count(cat.root_collection) && co.pk != cat.root_collection) {
+                     parent = cat.root_collection;
+                 }
+-                ++repaired;
++                if (*co.parent >= 0) ++repaired;  // -1: Capture One for Windows' "no parent" (as in a sync)
+             }
+             parent_of[co.pk] = parent;
+         }
+diff --git a/tests/tests.cpp b/tests/tests.cpp
+index 3b9fbd5..8177ddf 100644
+--- a/tests/tests.cpp
++++ b/tests/tests.cpp
+@@ -1616,6 +1616,30 @@ static void platform_port() {
+         CHECK_EQ(find_by(all, "uuid", "IMG-A")["path"].get<std::string>(), (fc.photos / "A.NEF").generic_string());
+         CHECK(before == census(fc.package));
+     });
++
++    run("ZPARENT -1, as Capture One for Windows writes it: the tree of a Mac catalog, and no cycle", [] {
++        fs::path root = tmpdir("parent-1");
++        FakeCatalog fc(root);
++        // Root, All Images and the top folder: -1 where a Mac catalog has NULL or the root.
++        fc.edit("UPDATE ZCOLLECTION SET ZPARENT = -1 WHERE Z_PK IN (1, 2, 20)");
++        Ctx c;
++        Json r = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}});
++        CHECK_EQ(r["sync"]["collections"]["parents_repaired"].get<int>(), 1);  // only COL-F-SUB's, whose parent row is gone
++        Json cols = c("collections.list", {{"library", r["library"]}})["collections"];
++        CHECK(find_by(cols, "uuid", "COL-ROOT")["parent"].is_null());
++        CHECK_EQ(find_by(cols, "uuid", "COL-ALL")["parent"].get<std::string>(), std::string("COL-ROOT"));
++        CHECK(find_by(cols, "uuid", "COL-F-ROOT")["parent"].is_null());
++        CHECK_EQ(find_by(cols, "uuid", "COL-F-PHOTOS")["parent"].get<std::string>(), std::string("COL-F-ROOT"));
++        Json cp = c("capture_one.copy", {{"source", fc.package.generic_string()}, {"path", (root / "Copy").generic_string()}});
++        CHECK_EQ(cp["report"]["parents_repaired"].get<int>(), 1);
++        Json ccols = c("collections.list", {{"library", cp["library"]}})["collections"];
++        int roots = 0;
++        for (auto& col : ccols) {
++            roots += col["kind"] == "root";
++            CHECK(!(col["parent"].is_string() && col["parent"] == col["uuid"]));
++        }
++        CHECK_EQ(roots, 1);
++    });
+ }
+ 
+ // --- part 2: the real catalog ----------------------------------------------------------------------
+-- 
+2.43.0
+

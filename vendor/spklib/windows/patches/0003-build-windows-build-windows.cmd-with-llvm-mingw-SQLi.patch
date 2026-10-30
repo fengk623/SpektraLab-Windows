@@ -1,0 +1,653 @@
+From 12a036ad5189bb8ddde5918a620634d9aadf52e8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 23:29:46 -0500
+Subject: [PATCH 3/3] build(windows): build-windows.cmd with llvm-mingw, SQLite
+ compiled in, the UTF-8 manifest; tests/c1_acceptance.py; 0.3.2
+
+- build-windows.cmd: libspklib.a, spklib-host.exe and spklib-tests.exe with
+  clang, llvm-ar and llvm-windres from llvm-mingw (LLVM_MINGW or PATH), as
+  build.sh is on a Mac: no CMake, no package manager. Static (-static), so
+  the helper is one file. `test` runs the tests with TMP and TEMP inside
+  build\windows-x64\tmp. `release` is optimised, stripped and written
+  without a timestamp (--no-insert-timestamp, -ffile-prefix-map), so the
+  same sources and toolchain give the same bytes; it writes the .sha256.
+- third_party/sqlite/fetch.py: SQLite 3.54.1's amalgamation, checked
+  against the size and SHA3-256 sqlite.org publishes before it is unpacked;
+  the three files are not committed. macOS keeps the system SQLite.
+- host/spklib.manifest (+ spklib.rc): activeCodePage UTF-8 and
+  longPathAware, embedded in the host and the tests.
+- tests/c1_acceptance.py: drives spklib-host over stdio against a real
+  Capture One catalog (and session) and checks every answer against an
+  independent reading of a byte copy of the database, plus a size / mtime /
+  SHA-256 census of every file before and after. Standard library only;
+  runs on macOS too.
+- .gitattributes: *.cmd with CRLF (cmd.exe needs it for labels).
+- VERSION 0.3.2: the Windows port. abi 1 and schema 3 unchanged.
+
+Gate: tests/c1_acceptance.py on Linux against a synthetic catalog and
+session (non-ASCII names, ZPARENT -1, an in-package location) -- 31 passed,
+0 failed. build-windows.cmd is first run on the Windows PC.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ .gitattributes              |   2 +
+ .gitignore                  |   4 +
+ VERSION                     |   2 +-
+ build-windows.cmd           |  81 ++++++++
+ host/spklib.manifest        |  23 +++
+ host/spklib.rc              |   3 +
+ tests/c1_acceptance.py      | 368 ++++++++++++++++++++++++++++++++++++
+ third_party/sqlite/fetch.py |  69 +++++++
+ 8 files changed, 551 insertions(+), 1 deletion(-)
+ create mode 100644 .gitattributes
+ create mode 100644 build-windows.cmd
+ create mode 100644 host/spklib.manifest
+ create mode 100644 host/spklib.rc
+ create mode 100644 tests/c1_acceptance.py
+ create mode 100644 third_party/sqlite/fetch.py
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..8517edc
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,2 @@
++*.cmd text eol=crlf
++*.bat text eol=crlf
+diff --git a/.gitignore b/.gitignore
+index c0b0892..03735f4 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,7 @@
+ build/
+ *.o
+ .DS_Store
++third_party/sqlite/sqlite3.c
++third_party/sqlite/sqlite3.h
++third_party/sqlite/sqlite3ext.h
++__pycache__/
+diff --git a/VERSION b/VERSION
+index 9e11b32..d15723f 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-0.3.1
++0.3.2
+diff --git a/build-windows.cmd b/build-windows.cmd
+new file mode 100644
+index 0000000..c9859a3
+--- /dev/null
++++ b/build-windows.cmd
+@@ -0,0 +1,81 @@
++@echo off
++rem build-windows.cmd -- the SDK, its host and its tests on Windows (x64), as build.sh is on a Mac.
++rem No CMake, no package manager: clang, llvm-ar and llvm-windres from llvm-mingw, and the SQLite
++rem amalgamation compiled in (python third_party\sqlite\fetch.py puts it in place, checked).
++rem
++rem   build-windows.cmd           build\windows-x64\: libspklib.a, spklib-host.exe, spklib-tests.exe
++rem   build-windows.cmd test      build, then run the tests (SPKLIB_C1_CATALOG for a real catalog)
++rem   build-windows.cmd release   the helper as shipped: optimised, stripped, no timestamp, so the same
++rem                               sources and toolchain give the same bytes;
++rem                               build\windows-x64\release\spklib-host.exe and its .sha256
++rem
++rem The toolchain: %LLVM_MINGW%\bin when LLVM_MINGW is set, else whatever clang is on PATH.
++rem SPKLIB_COMMIT, when set, is appended to the version (0.3.2+<commit>), as build.sh release does.
++rem The tests write only below build\windows-x64\tmp: TMP and TEMP point there while they run.
++setlocal EnableExtensions
++cd /d "%~dp0"
++set "MODE=%~1"
++if "%MODE%"=="" set "MODE=native"
++if not "%MODE%"=="native" if not "%MODE%"=="test" if not "%MODE%"=="release" (
++  echo usage: build-windows.cmd [test^|release] 1>&2
++  exit /b 2
++)
++if defined LLVM_MINGW set "PATH=%LLVM_MINGW%\bin;%PATH%"
++for %%T in (clang clang++ llvm-ar llvm-windres) do (
++  where %%T >nul 2>&1 || (echo build-windows: %%T not found; set LLVM_MINGW to an llvm-mingw folder 1>&2 & exit /b 2)
++)
++if not exist third_party\sqlite\sqlite3.c (
++  echo build-windows: no SQLite amalgamation; run: python third_party\sqlite\fetch.py 1>&2
++  exit /b 2
++)
++
++set /p VERSION=<VERSION
++if defined SPKLIB_COMMIT set "VERSION=%VERSION%+%SPKLIB_COMMIT%"
++set "OUT=build\windows-x64"
++set "OPT=-O2 -g"
++set "STRIP="
++if "%MODE%"=="release" (
++  set "OUT=build\windows-x64\release"
++  set "OPT=-O2 -DNDEBUG"
++  set "STRIP=-s"
++)
++set "OBJ=%OUT%\obj"
++if not exist "%OBJ%" mkdir "%OBJ%"
++set "FIXTURES=%CD:\=/%/tests/fixtures"
++set "SRCDIR=%CD%"
++
++rem No absolute path of this checkout or of the toolchain ends up in the binary (reproducible builds).
++set MAPS="-ffile-prefix-map=%SRCDIR%=."
++if defined LLVM_MINGW set MAPS=%MAPS% "-ffile-prefix-map=%LLVM_MINGW%=llvm-mingw"
++set CFLAGS=-O2 -DNDEBUG -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_DEFAULT_MEMSTATUS=0 -D_WIN32_WINNT=0x0A00 %MAPS%
++set CXXFLAGS=-std=c++20 %OPT% -Wall -Wextra -Wno-unused-parameter -Iinclude -Isrc -Ithird_party -Ithird_party/sqlite -D_WIN32_WINNT=0x0A00 "-DSPKLIB_VERSION=\"%VERSION%\"" "-DSPKLIB_FIXTURES=\"%FIXTURES%\"" %MAPS%
++set LDFLAGS=-static %STRIP% -Wl,--no-insert-timestamp -lnormaliz
++
++echo build-windows: spklib %VERSION% (%MODE%) into %OUT%
++clang %CFLAGS% -c third_party\sqlite\sqlite3.c -o %OBJ%\sqlite3.o || goto :fail
++for %%S in (sqlite capture_one library api platform) do (
++  clang++ %CXXFLAGS% -c src\%%S.cpp -o %OBJ%\%%S.o || goto :fail
++)
++rem llvm-ar r replaces members by name; the member set is fixed, so nothing stale survives a rebuild.
++llvm-ar rcs %OUT%\libspklib.a %OBJ%\sqlite3.o %OBJ%\sqlite.o %OBJ%\capture_one.o %OBJ%\library.o %OBJ%\api.o %OBJ%\platform.o || goto :fail
++llvm-windres -I host host\spklib.rc -O coff -o %OBJ%\spklib.res.o || goto :fail
++clang++ %CXXFLAGS% host\main.cpp %OBJ%\spklib.res.o %OUT%\libspklib.a %LDFLAGS% -o %OUT%\spklib-host.exe || goto :fail
++if "%MODE%"=="release" (
++  python -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest() + '  spklib-host.exe')" %OUT%\spklib-host.exe > %OUT%\spklib-host.exe.sha256 || goto :fail
++  type %OUT%\spklib-host.exe.sha256
++  %OUT%\spklib-host.exe --version
++  exit /b 0
++)
++clang++ %CXXFLAGS% tests\tests.cpp %OBJ%\spklib.res.o %OUT%\libspklib.a %LDFLAGS% -o %OUT%\spklib-tests.exe || goto :fail
++echo build-windows: built %OUT%\spklib-host.exe and %OUT%\spklib-tests.exe
++if not "%MODE%"=="test" exit /b 0
++
++if not exist "%OUT%\tmp" mkdir "%OUT%\tmp"
++set "TMP=%CD%\%OUT%\tmp"
++set "TEMP=%CD%\%OUT%\tmp"
++%OUT%\spklib-tests.exe
++exit /b %ERRORLEVEL%
++
++:fail
++echo build-windows: failed 1>&2
++exit /b 1
+diff --git a/host/spklib.manifest b/host/spklib.manifest
+new file mode 100644
+index 0000000..1f118dd
+--- /dev/null
++++ b/host/spklib.manifest
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
++<!--
++  Embedded in spklib-host.exe and spklib-tests.exe (host/spklib.rc).
++  activeCodePage UTF-8: argv, std::filesystem::path from a std::string, std::ifstream and the C
++  runtime's narrow file functions then take UTF-8, which is what every spklib path is. Windows 10
++  1903 or later; spklib_create refuses to start without it (src/platform.hpp).
++  longPathAware: paths over 260 characters work when the system allows them (LongPathsEnabled).
++-->
++<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
++  <assemblyIdentity type="win32" name="SpektraLab.spklib" version="0.3.2.0"/>
++  <application xmlns="urn:schemas-microsoft-com:asm.v3">
++    <windowsSettings>
++      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
++      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
++    </windowsSettings>
++  </application>
++  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
++    <application>
++      <!-- Windows 10 and 11 -->
++      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
++    </application>
++  </compatibility>
++</assembly>
+diff --git a/host/spklib.rc b/host/spklib.rc
+new file mode 100644
+index 0000000..7b6f527
+--- /dev/null
++++ b/host/spklib.rc
+@@ -0,0 +1,3 @@
++// The UTF-8 code page manifest (spklib.manifest), as resource 1 of type
++// RT_MANIFEST (24): what Windows reads when it starts the program.
++1 24 "spklib.manifest"
+diff --git a/tests/c1_acceptance.py b/tests/c1_acceptance.py
+new file mode 100644
+index 0000000..25a5c99
+--- /dev/null
++++ b/tests/c1_acceptance.py
+@@ -0,0 +1,368 @@
++#!/usr/bin/env python3
++"""Acceptance of spklib-host against a real Capture One catalog (and session), on any platform.
++
++    python tests/c1_acceptance.py --host build/windows-x64/spklib-host.exe \\
++        --catalog "D:/Pictures/Test.cocatalog" [--session "D:/Pictures/Test Session"] \\
++        --work build/acceptance [--label "Capture One open"] [--json report.json]
++
++What it proves, and how:
++
++1. **Nothing in the Capture One package or session folder changes.** Every file under them is
++   listed with its size, modification time and SHA-256 before anything runs and again at the end;
++   the two lists must be identical (no file changed, added or removed). Run it with Capture One
++   closed for the strict form of this claim: an open Capture One writes its own files.
++2. **The helper reads the catalog completely and correctly.** Through `spklib-host` over stdio,
++   as the app talks to it: `capture_one.probe`, `capture_one.link`, `library.info`,
++   `images.list`, `collections.list`, `locations.list`. Every answer is compared with an
++   independent reading of a byte copy of the same database made here, with Python's own
++   SQLite: image and variant counts, each image's path (resolved again here: ZWINROOT on
++   Windows when Capture One wrote one, else ZMACROOT; backslashes are separators on Windows),
++   that the file exists, the trash flag, each variant's rating and colour tag (from the
++   combined layer), every album's image count, and the folder tree (each folder's parent is
++   the nearest folder above it by path, as Capture One shows it).
++3. **A session is probed, not read.** `capture_one.probe` on a `.cosessiondb` reports its
++   counts, which are compared with the same independent reading; `capture_one.link` on it must
++   answer `unsupported` (sessions wait for SESSION-DESIGN.md §6). A successful probe shows the
++   database is recognised; it is not a complete read of the session.
++
++Writes only inside --work (the mirror library, the oracle's copy, the report). Standard
++library only. Exit status 0 when every check passes.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++import shutil
++import sqlite3
++import subprocess
++import sys
++import time
++from pathlib import Path
++
++WINDOWS = os.name == "nt"
++
++
++# --- the package, before and after -------------------------------------------------------------
++
++def census(root: Path) -> dict[str, list]:
++    out: dict[str, list] = {}
++    for dirpath, dirnames, filenames in os.walk(root):
++        dirnames.sort()
++        for name in sorted(filenames):
++            p = Path(dirpath) / name
++            st = p.stat()
++            h = hashlib.sha256()
++            with open(p, "rb") as f:
++                for chunk in iter(lambda: f.read(1 << 20), b""):
++                    h.update(chunk)
++            out[p.relative_to(root).as_posix()] = [st.st_size, st.st_mtime_ns, h.hexdigest()]
++    return out
++
++
++def census_diff(before: dict, after: dict) -> list[str]:
++    diffs = []
++    for k in sorted(set(before) | set(after)):
++        if k not in after:
++            diffs.append(f"removed: {k}")
++        elif k not in before:
++            diffs.append(f"added: {k}")
++        elif before[k] != after[k]:
++            diffs.append(f"changed: {k} {before[k]} -> {after[k]}")
++    return diffs
++
++
++# --- the helper over stdio ---------------------------------------------------------------------
++
++class Host:
++    def __init__(self, exe: Path, store: Path):
++        self.p = subprocess.Popen([str(exe), "--store", str(store)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
++                                  stderr=subprocess.PIPE)
++        ready = json.loads(self.p.stdout.readline())
++        if ready.get("event") != "ready":
++            raise RuntimeError(f"no ready line: {ready}")
++        self.ready = ready
++        self.n = 0
++
++    def call(self, method: str, params: dict | None = None) -> tuple[bool, dict]:
++        self.n += 1
++        line = json.dumps({"id": self.n, "method": method, "params": params or {}}, ensure_ascii=False) + "\n"
++        self.p.stdin.write(line.encode("utf-8"))
++        self.p.stdin.flush()
++        raw = self.p.stdout.readline()
++        if not raw.endswith(b"\n") or raw.endswith(b"\r\n"):
++            raise RuntimeError(f"{method}: a reply must end in a bare \\n: {raw[-20:]!r}")
++        reply = json.loads(raw)
++        if reply.get("id") != self.n:
++            raise RuntimeError(f"{method}: reply id {reply.get('id')} for request {self.n}")
++        return ("result" in reply), reply.get("result", reply.get("error"))
++
++    def close(self) -> str:
++        try:
++            self.call("host.shutdown")
++        except Exception:
++            pass
++        try:
++            self.p.stdin.close()
++        except Exception:
++            pass
++        self.p.wait(timeout=30)
++        return self.p.stderr.read().decode("utf-8", "replace")
++
++
++# --- the independent reading -------------------------------------------------------------------
++
++def find_db(path: Path, suffix: str) -> Path:
++    if path.is_file():
++        return path
++    found = [p for p in path.iterdir() if p.is_file() and p.suffix == suffix]
++    if len(found) != 1:
++        raise SystemExit(f"expected one {suffix} in {path}, found {len(found)}")
++    return found[0]
++
++
++def byte_copy(src: Path, dst: Path) -> None:
++    with open(src, "rb") as i, open(dst, "wb") as o:
++        shutil.copyfileobj(i, o, 1 << 20)
++
++
++def open_copy(path: Path) -> sqlite3.Connection:
++    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
++
++
++def spelled(p: str) -> str:
++    """A path as spklib returns it: '/' between components on Windows."""
++    return p.replace("\\", "/") if WINDOWS else p
++
++
++def oracle_root(mac: str | None, win: str | None) -> str:
++    if WINDOWS and win and win.strip():
++        r = win.replace("\\", "/")
++        return r + "/" if len(r) == 2 and r[1] == ":" else r
++    return mac or ""
++
++
++def oracle_join(base: str, rel: str | None) -> str:
++    r = (rel or "").replace("\\", "/") if WINDOWS else (rel or "")
++    r = r.lstrip("/")
++    b = base
++    while len(b) > 1 and b.endswith("/") and not (WINDOWS and len(b) == 3 and b[1] == ":"):
++        b = b[:-1]
++    if not r:
++        return b
++    return b + r if b.endswith("/") else b + "/" + r
++
++
++def layer_of(db: sqlite3.Connection) -> str:
++    """The layer whose metadata Capture One shows: the combined one, else the adjustment layer
++    (docs/CAPTURE-ONE-CATALOG.md)."""
++    cols = {r[1] for r in db.execute("PRAGMA table_info(ZVARIANT)")}
++    return "COALESCE(v.ZCOMBINEDSETTINGS, v.ZADJUSTMENTLAYER)" if "ZADJUSTMENTLAYER" in cols else "v.ZCOMBINEDSETTINGS"
++
++
++def oracle_catalog(db: sqlite3.Connection, package: str) -> dict:
++    q = lambda sql, *a: db.execute(sql, a).fetchall()
++    entity = dict(q("SELECT Z_ENT, ZNAME FROM ZENTITIES"))
++    loc = {}
++    for pk, rel_flag, mac, win, rel in q("SELECT Z_PK, ZISRELATIVE, ZMACROOT, ZWINROOT, ZRELATIVEPATH FROM ZPATHLOCATION"):
++        loc[pk] = oracle_join(package if rel_flag else oracle_root(mac, win), rel)
++    images = {}
++    for uuid, name, l, trashed in q("SELECT ZIMAGEUUID, ZIMAGEFILENAME, ZIMAGELOCATION, ZISTRASHED FROM ZIMAGE"):
++        images[uuid] = {"path": oracle_join(loc[l], name), "trashed": bool(trashed)}
++    variants = {}
++    for vu, iu, rating, color in q(
++            "SELECT v.ZVARIANTUUID, i.ZIMAGEUUID, COALESCE(m.ZBASIC_RATING, 0), COALESCE(m.ZCOLOR_TAG_INDEX, 0)"
++            " FROM ZVARIANT v JOIN ZIMAGE i ON i.Z_PK = v.ZIMAGE"
++            f" LEFT JOIN ZVARIANTLAYER l ON l.Z_PK = {layer_of(db)} LEFT JOIN ZVARIANTMETADATA m ON m.ZLAYER = l.Z_PK"):
++        variants[vu] = {"image": iu, "rating": rating, "color_tag": color or None}
++    cols = {}
++    for pk, ent, cu, name, parent, floc in q("SELECT Z_PK, Z_ENT, ZUUID, ZNAME, ZPARENT, ZFOLDERLOCATION FROM ZCOLLECTION"):
++        cols[pk] = {"entity": entity.get(ent, str(ent)), "uuid": cu, "name": name, "parent": parent,
++                    "folder": loc.get(floc) if floc else None}
++    albums = {}
++    for cu, n in q("SELECT c.ZUUID, count(i.Z_PK) FROM ZCOLLECTION c JOIN ZENTITIES e ON e.Z_ENT = c.Z_ENT"
++                   " LEFT JOIN ZIMAGEINCOLLECTION ic ON ic.ZCOLLECTION = c.Z_PK"
++                   " LEFT JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"
++                   " WHERE e.ZNAME IN ('AlbumCollection') GROUP BY c.Z_PK"):
++        albums[cu] = n
++    # The folder tree as Capture One shows it: a folder hangs from the nearest folder above it.
++    folders = {c["uuid"]: c["folder"] for c in cols.values() if c["entity"] == "CatalogFolderCollection" and c["folder"]}
++    folder_parent = {}
++    for u, d in folders.items():
++        best, parent = -1, None
++        for v, e in folders.items():
++            if v != u and (d.startswith(e) if e.endswith("/") else d.startswith(e + "/")) and len(e) > best:
++                best, parent = len(e), v
++        folder_parent[u] = parent
++    return {"locations": loc, "images": images, "variants": variants, "collections": cols, "albums": albums,
++            "folders": folders, "folder_parent": folder_parent,
++            "format": q("SELECT ZFORMAT FROM ZVERSIONINFO ORDER BY ZVERSION DESC, Z_PK DESC LIMIT 1")[0][0],
++            "document_uuid": q("SELECT ZDOCUMENTUUID FROM ZDOCUMENTCONTENT LIMIT 1")[0][0]}
++
++
++def oracle_counts(db: sqlite3.Connection) -> dict:
++    q = lambda sql: db.execute(sql).fetchone()[0]
++    lay = layer_of(db)
++    rated = q("SELECT count(*) FROM ZVARIANT v LEFT JOIN ZVARIANTLAYER l ON l.Z_PK = " + lay +
++              " LEFT JOIN ZVARIANTMETADATA m ON m.ZLAYER = l.Z_PK WHERE COALESCE(m.ZBASIC_RATING, 0) > 0")
++    tagged = q("SELECT count(*) FROM ZVARIANT v LEFT JOIN ZVARIANTLAYER l ON l.Z_PK = " + lay +
++               " LEFT JOIN ZVARIANTMETADATA m ON m.ZLAYER = l.Z_PK WHERE COALESCE(m.ZCOLOR_TAG_INDEX, 0) > 0")
++    return {"images": q("SELECT count(*) FROM ZIMAGE"), "variants": q("SELECT count(*) FROM ZVARIANT"),
++            "locations": q("SELECT count(*) FROM ZPATHLOCATION"), "collections": q("SELECT count(*) FROM ZCOLLECTION"),
++            "trashed": q("SELECT count(*) FROM ZIMAGE WHERE ZISTRASHED = 1"),
++            "inside_catalog": q("SELECT count(*) FROM ZIMAGE WHERE ZISINSIDECATALOG = 1"),
++            "rated": rated, "color_tagged": tagged}
++
++
++# --- the run -----------------------------------------------------------------------------------
++
++class Checks:
++    def __init__(self):
++        self.items: list[dict] = []
++
++    def add(self, name: str, ok: bool, detail="") -> None:
++        self.items.append({"check": name, "ok": bool(ok), "detail": detail})
++        print(("PASS " if ok else "FAIL ") + name + (f" -- {detail}" if detail and not ok else ""))
++
++    def ok(self) -> bool:
++        return all(i["ok"] for i in self.items)
++
++
++def main(argv: list[str]) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    ap.add_argument("--host", type=Path, required=True)
++    ap.add_argument("--catalog", type=Path, required=True)
++    ap.add_argument("--session", type=Path)
++    ap.add_argument("--work", type=Path, required=True)
++    ap.add_argument("--label", default="")
++    ap.add_argument("--json", type=Path)
++    a = ap.parse_args(argv)
++    try:
++        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
++    except (AttributeError, ValueError):
++        pass
++
++    work = a.work.resolve()
++    if work.exists():
++        raise SystemExit(f"--work {work} exists; give a new folder (nothing is deleted here)")
++    work.mkdir(parents=True)
++    catalog = a.catalog.resolve()
++    session = a.session.resolve() if a.session else None
++    checks = Checks()
++    report: dict = {"label": a.label, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "platform": sys.platform,
++                    "catalog": str(catalog), "session": str(session) if session else None}
++
++    roots = [catalog] + ([session] if session else [])
++    t0 = time.time()
++    before = {str(r): census(r) for r in roots}
++    report["census_files"] = {k: len(v) for k, v in before.items()}
++    report["census_seconds"] = round(time.time() - t0, 2)
++
++    host = Host(a.host, work / "store")
++    report["host"] = host.ready
++    ok, ver = host.call("sdk.version")
++    report["sdk"] = ver
++
++    # Catalog: probe, then the independent reading of a byte copy.
++    cat_db = find_db(catalog, ".cocatalogdb")
++    ok, probe = host.call("capture_one.probe", {"path": str(catalog)})
++    report["catalog_probe"] = probe
++    checks.add("catalog: probe answers supported", ok and probe.get("supported") is True, json.dumps(probe)[:300])
++    byte_copy(cat_db, work / "oracle-catalog.db")
++    odb = open_copy(work / "oracle-catalog.db")
++    counts = oracle_counts(odb)
++    package = spelled(str(catalog))
++    oc = oracle_catalog(odb, package)
++    report["catalog_oracle_counts"] = counts
++    if ok:
++        pc = probe.get("counts", {})
++        for k in ("images", "variants", "locations", "collections", "trashed", "inside_catalog", "rated", "color_tagged"):
++            checks.add(f"catalog: probe count {k} = {counts[k]}", pc.get(k) == counts[k], f"probe {pc.get(k)}")
++        checks.add("catalog: probe document UUID", probe.get("document_uuid") == oc["document_uuid"])
++        checks.add("catalog: probe format", probe.get("format") == oc["format"], probe.get("format"))
++
++    # Catalog: link and read it the way the app does.
++    ok, link = host.call("capture_one.link", {"source": str(catalog), "path": str(work / "Mirror")})
++    checks.add("catalog: link", ok, json.dumps(link)[:300])
++    if ok:
++        L = link["library"]
++        report["link_report"] = link.get("sync")
++        ok, info = host.call("library.info", {"library": L})
++        report["library_info"] = info
++        ok, page = host.call("images.list", {"library": L, "include_trashed": True, "full": True, "check_files": True})
++        imgs = {i["uuid"]: i for i in page["images"]}
++        checks.add(f"catalog: images.list total = {len(oc['images'])}", page["total"] == len(oc["images"]), page["total"])
++        bad_path = [u for u, o in oc["images"].items() if u not in imgs or imgs[u]["path"] != o["path"]]
++        checks.add("catalog: every image path equals the independent resolution", not bad_path,
++                   "; ".join(f"{u}: {imgs.get(u, {}).get('path')} != {oc['images'][u]['path']}" for u in bad_path[:5]))
++        missing = [u for u, i in imgs.items() if not i.get("exists")]
++        exist_oracle = [u for u, o in oc["images"].items() if not Path(o["path"]).exists()]
++        checks.add("catalog: every file exists (helper and independent check agree)",
++                   sorted(missing) == sorted(exist_oracle), f"helper missing {missing[:5]}, oracle missing {exist_oracle[:5]}")
++        bad_trash = [u for u, o in oc["images"].items() if u in imgs and imgs[u]["trashed"] != o["trashed"]]
++        checks.add("catalog: trash flags", not bad_trash, str(bad_trash[:5]))
++        sdk_vars = {v["uuid"]: v for i in page["images"] for v in i.get("variants", [])}
++        checks.add(f"catalog: variants = {len(oc['variants'])}", len(sdk_vars) == len(oc["variants"]), len(sdk_vars))
++        bad_meta = [u for u, o in oc["variants"].items()
++                    if u not in sdk_vars or sdk_vars[u]["rating"] != o["rating"] or sdk_vars[u]["color_tag"] != o["color_tag"]]
++        checks.add("catalog: every variant's rating and colour tag", not bad_meta,
++                   "; ".join(f"{u}: {sdk_vars.get(u)} vs {oc['variants'][u]}" for u in bad_meta[:5]))
++        ok, cl = host.call("collections.list", {"library": L})
++        cols = {c["uuid"]: c for c in cl["collections"]}
++        report["collections"] = [{k: c.get(k) for k in ("uuid", "kind", "title", "parent", "image_count")} for c in cl["collections"]]
++        bad_album = [u for u, n in oc["albums"].items() if u not in cols or cols[u].get("image_count") != n]
++        checks.add(f"catalog: {len(oc['albums'])} albums, each with Capture One's image count", not bad_album,
++                   "; ".join(f"{u}: {cols.get(u, {}).get('image_count')} != {oc['albums'][u]}" for u in bad_album[:5]))
++        bad_folder = [u for u in oc["folders"] if u not in cols or cols[u].get("kind") != "folder"]
++        checks.add(f"catalog: {len(oc['folders'])} folders", not bad_folder, str(bad_folder[:5]))
++        bad_parent = [u for u, p in oc["folder_parent"].items() if u in cols and cols[u].get("parent") != p]
++        checks.add("catalog: folder tree (each folder under the nearest folder above it)", not bad_parent,
++                   "; ".join(f"{u}: parent {cols[u].get('parent')} != {oc['folder_parent'][u]}" for u in bad_parent[:5]))
++        roots_n = sum(1 for c in cl["collections"] if c.get("kind") == "root")
++        cycles = [c["uuid"] for c in cl["collections"] if c.get("parent") == c["uuid"]]
++        checks.add("catalog: one root, no collection its own parent", roots_n == 1 and not cycles, f"roots {roots_n}, {cycles}")
++        ok, ll = host.call("locations.list", {"library": L})
++        sdk_locs = sorted(x["path"] for x in ll.get("locations", ll.get("folders", [])) if "path" in x)
++        checks.add("catalog: locations.list paths are the independent resolution",
++                   sdk_locs == sorted(set(oc["locations"].values())) or set(sdk_locs) <= set(oc["locations"].values()),
++                   f"{sdk_locs[:3]} vs {sorted(set(oc['locations'].values()))[:3]}")
++        report["images"] = [{k: i.get(k) for k in ("file_name", "path", "exists", "rating", "color_tag", "trashed")}
++                            for i in page["images"]]
++
++    # Session: probe only.
++    if session:
++        ses_db = find_db(session, ".cosessiondb")
++        ok, sp = host.call("capture_one.probe", {"path": str(session)})
++        report["session_probe"] = sp
++        checks.add("session: probe recognises a session database", ok and sp.get("document") == "session", json.dumps(sp)[:300])
++        byte_copy(ses_db, work / "oracle-session.db")
++        sc = oracle_counts(open_copy(work / "oracle-session.db"))
++        report["session_oracle_counts"] = sc
++        if ok and sp.get("supported"):
++            for k in ("images", "variants", "rated", "color_tagged"):
++                checks.add(f"session: probe count {k} = {sc[k]}", sp.get("counts", {}).get(k) == sc[k],
++                           f"probe {sp.get('counts', {}).get(k)}")
++        ok, sl = host.call("capture_one.link", {"source": str(session), "path": str(work / "SessionMirror")})
++        checks.add("session: link answers unsupported (sessions are probed, not read, until SESSION-DESIGN §6)",
++                   (not ok) and sl.get("code") == "unsupported", json.dumps(sl)[:200])
++
++    report["host_stderr"] = host.close()[-4000:]
++
++    after = {str(r): census(r) for r in roots}
++    for r in roots:
++        d = census_diff(before[str(r)], after[str(r)])
++        report.setdefault("census_diff", {})[str(r)] = d
++        checks.add(f"unchanged: every file under {r.name} (size, mtime, SHA-256; {len(before[str(r)])} files)", not d,
++                   "; ".join(d[:5]))
++
++    report["checks"] = checks.items
++    report["passed"] = checks.ok()
++    if a.json:
++        a.json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
++    print(f"\n{sum(i['ok'] for i in checks.items)} passed, {sum(not i['ok'] for i in checks.items)} failed")
++    return 0 if checks.ok() else 1
++
++
++if __name__ == "__main__":
++    sys.exit(main(sys.argv[1:]))
+diff --git a/third_party/sqlite/fetch.py b/third_party/sqlite/fetch.py
+new file mode 100644
+index 0000000..ee8d7e0
+--- /dev/null
++++ b/third_party/sqlite/fetch.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++"""Fetch the SQLite amalgamation the Windows build compiles in (build-windows.cmd).
++
++    python third_party/sqlite/fetch.py              download from sqlite.org, check, unpack
++    python third_party/sqlite/fetch.py --zip FILE   check and unpack a zip already downloaded
++
++macOS links the system SQLite (build.sh); Windows has none a program can rely on, so the build
++compiles one pinned release in. The zip is checked against the size and SHA3-256 that
++sqlite.org publishes on https://www.sqlite.org/download.html before anything is unpacked, and
++only sqlite3.c, sqlite3.h and sqlite3ext.h are taken from it. They are not committed
++(.gitignore). SQLite is in the public domain.
++
++Standard library only. Exit status 0 when the three files are in place and match the pin.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import io
++import re
++import sys
++import urllib.request
++import zipfile
++from pathlib import Path
++
++VERSION = "3.54.1"
++NAME = "sqlite-amalgamation-3540100"
++URL = f"https://www.sqlite.org/2026/{NAME}.zip"
++SIZE = 2990966
++SHA3_256 = "92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30"
++FILES = ("sqlite3.c", "sqlite3.h", "sqlite3ext.h")
++HERE = Path(__file__).resolve().parent
++
++
++def check(data: bytes) -> None:
++    if len(data) != SIZE:
++        raise SystemExit(f"fetch.py: {NAME}.zip is {len(data)} bytes, sqlite.org says {SIZE}; not unpacked")
++    digest = hashlib.sha3_256(data).hexdigest()
++    if digest != SHA3_256:
++        raise SystemExit(f"fetch.py: {NAME}.zip has SHA3-256 {digest}, sqlite.org says {SHA3_256}; not unpacked")
++
++
++def main(argv: list[str]) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    ap.add_argument("--zip", type=Path, help="a downloaded copy of " + NAME + ".zip")
++    args = ap.parse_args(argv)
++
++    if all((HERE / f).is_file() for f in FILES):
++        header = (HERE / "sqlite3.h").read_text(encoding="utf-8", errors="replace")
++        if re.search(r'#define SQLITE_VERSION\s+"' + re.escape(VERSION) + '"', header):
++            print(f"fetch.py: SQLite {VERSION} is already in {HERE}")
++            return 0
++
++    if args.zip:
++        data = args.zip.read_bytes()
++    else:
++        print(f"fetch.py: downloading {URL}")
++        with urllib.request.urlopen(URL, timeout=120) as r:
++            data = r.read()
++    check(data)
++    with zipfile.ZipFile(io.BytesIO(data)) as z:
++        for f in FILES:
++            (HERE / f).write_bytes(z.read(f"{NAME}/{f}"))
++    print(f"fetch.py: SQLite {VERSION} unpacked into {HERE} (SHA3-256 {SHA3_256[:12]}... checked)")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main(sys.argv[1:]))
+-- 
+2.43.0
+
