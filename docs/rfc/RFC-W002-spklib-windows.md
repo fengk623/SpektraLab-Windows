@@ -4,7 +4,7 @@ title: spklib 辅助程序的 Windows 移植：平台层、Capture One for Windo
 status: Review
 owner: fengk623
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-30
 baseline: 368d1974943a4a4982339fd355a859cad74e69a4
 prd: PRD-W001
 tests:
@@ -84,7 +84,7 @@ spklib 内部与对外都用 `/` 分隔的 UTF-8 字符串。Windows 上的根�
 
 ### 6.2 人工验收（真实 Capture One）
 
-`tests/c1_acceptance.py` 与 spklib-tests 的真实目录一轮，对 Capture One 16.6.4 for Windows 建的测试目录与测试会话运行；Capture One 关闭与打开各一次。结果写在 `vendor/spklib/windows/README.md` 的“验收”一节。
+`tests/c1_acceptance.py` 与 spklib-tests 的真实目录一轮，对 Capture One 16.6.4 for Windows 建的测试目录与测试会话运行；Capture One 关闭与打开各一次。测试数据、预检与结果写在 `vendor/spklib/windows/ACCEPTANCE.md`。`c1_acceptance.py` 逐项对照独立读取：probe 计数、每张图的路径与文件存在、废纸篓、每个变体的星级与色标、每个相册的图片与所在的相册组、每个文件夹的路径、名称、图片与上下级，以及前后文件清点。会话只做 probe。
 
 ## 7. 备选方案（Alternatives）
 
@@ -104,6 +104,7 @@ spklib 内部与对外都用 `/` 分隔的 UTF-8 字符串。Windows 上的根�
 - 2026-10-28 · Windows 上路径统一用 `/` · 见 §7。
 - 2026-10-28 · `ZPARENT = -1` 按“没有父行”放置，不算修复 · 实测数据（§2）。
 - 2026-10-28 · 锁字节页写零 · SQLite 不使用该页；Windows 锁是强制的。
+- 2026-10-30 · spklib 文档随补丁更新（0005：README、API-SPEC 0.3.2、CAPTURE-ONE-CATALOG 的 Windows 一节、SESSION-DESIGN §6 的初步答案） · MR 要自带说明，审阅者不必读本仓库。
 
 ## 10. 待决问题（Open questions）
 

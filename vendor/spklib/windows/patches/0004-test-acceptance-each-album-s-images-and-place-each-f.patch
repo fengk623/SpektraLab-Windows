@@ -1,0 +1,143 @@
+From 6cf975ffad16971cbbbd04e0fa067171e3ae29cf Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 30 Oct 2026 11:03:53 -0500
+Subject: [PATCH 4/5] test(acceptance): each album's images and place, each
+ folder's path, name and images
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+tests/c1_acceptance.py checked album image counts and the folder tree's
+parents. The owner's acceptance asks for the photos, paths, ratings and the
+folder structure to be right, so it now also checks, against the same
+independent reading of a byte copy:
+
+- every album holds the same images as in Capture One (images.list with
+  that collection), not only the same number;
+- every album sits where it does in Capture One: at the top level, or in
+  its album group (an album inside a group, as Capture One's "Trips" >
+  "测试相册");
+- every folder's path is the independent resolution, its name is the
+  folder's own name (non-ASCII included; a volume root is named by its
+  path), and it holds the images whose location it is.
+
+Gate: on Linux against the synthetic catalog and session, 36 passed,
+0 failed. Against copies of the Capture One 16.6.4 for Windows test
+catalog and session read on Linux (where ZMACROOT is empty, so paths are
+not resolvable), every check that does not depend on the platform's root
+passes; with the oracle in Windows mode the folder tree matches spklib's.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ tests/c1_acceptance.py | 61 ++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 56 insertions(+), 5 deletions(-)
+
+diff --git a/tests/c1_acceptance.py b/tests/c1_acceptance.py
+index 25a5c99..5fc5b15 100644
+--- a/tests/c1_acceptance.py
++++ b/tests/c1_acceptance.py
+@@ -18,8 +18,9 @@ What it proves, and how:
+    SQLite: image and variant counts, each image's path (resolved again here: ZWINROOT on
+    Windows when Capture One wrote one, else ZMACROOT; backslashes are separators on Windows),
+    that the file exists, the trash flag, each variant's rating and colour tag (from the
+-   combined layer), every album's image count, and the folder tree (each folder's parent is
+-   the nearest folder above it by path, as Capture One shows it).
++   combined layer), every album's images (count and which ones) and where it sits (its parent
++   album group), and the folder tree: each folder's path, name and images, and its parent (the
++   nearest folder above it by path, as Capture One shows it).
+ 3. **A session is probed, not read.** `capture_one.probe` on a `.cosessiondb` reports its
+    counts, which are compared with the same independent reading; `capture_one.link` on it must
+    answer `unsupported` (sessions wait for SESSION-DESIGN.md §6). A successful probe shows the
+@@ -179,13 +180,28 @@ def oracle_catalog(db: sqlite3.Connection, package: str) -> dict:
+     cols = {}
+     for pk, ent, cu, name, parent, floc in q("SELECT Z_PK, Z_ENT, ZUUID, ZNAME, ZPARENT, ZFOLDERLOCATION FROM ZCOLLECTION"):
+         cols[pk] = {"entity": entity.get(ent, str(ent)), "uuid": cu, "name": name, "parent": parent,
+-                    "folder": loc.get(floc) if floc else None}
++                    "folder": loc.get(floc) if floc else None, "location": floc}
+     albums = {}
+     for cu, n in q("SELECT c.ZUUID, count(i.Z_PK) FROM ZCOLLECTION c JOIN ZENTITIES e ON e.Z_ENT = c.Z_ENT"
+                    " LEFT JOIN ZIMAGEINCOLLECTION ic ON ic.ZCOLLECTION = c.Z_PK"
+                    " LEFT JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"
+                    " WHERE e.ZNAME IN ('AlbumCollection') GROUP BY c.Z_PK"):
+         albums[cu] = n
++    # Which images each album holds, and the collection it sits in (None: the top level).
++    album_images = {cu: set() for cu in albums}
++    for cu, iu in q("SELECT c.ZUUID, i.ZIMAGEUUID FROM ZIMAGEINCOLLECTION ic JOIN ZCOLLECTION c ON c.Z_PK = ic.ZCOLLECTION"
++                    " JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"):
++        if cu in album_images:
++            album_images[cu].add(iu)
++    by_pk = {pk: c for pk, c in cols.items()}
++    top = {c["uuid"] for c in cols.values() if c["entity"] == "ProjectCollection"}
++    album_parent = {}
++    for c in cols.values():
++        if c["uuid"] in albums:
++            p = by_pk.get(c["parent"]) if c["parent"] is not None else None
++            album_parent[c["uuid"]] = None if p is None or p["uuid"] in top else p["uuid"]
++    # Each folder's images: the images whose location is that folder.
++    loc_of_image = dict(q("SELECT ZIMAGEUUID, ZIMAGELOCATION FROM ZIMAGE WHERE ZISTRASHED = 0"))
+     # The folder tree as Capture One shows it: a folder hangs from the nearest folder above it.
+     folders = {c["uuid"]: c["folder"] for c in cols.values() if c["entity"] == "CatalogFolderCollection" and c["folder"]}
+     folder_parent = {}
+@@ -195,8 +211,18 @@ def oracle_catalog(db: sqlite3.Connection, package: str) -> dict:
+             if v != u and (d.startswith(e) if e.endswith("/") else d.startswith(e + "/")) and len(e) > best:
+                 best, parent = len(e), v
+         folder_parent[u] = parent
++    folder_images = {}
++    folder_name = {}
++    for c in cols.values():
++        if c["entity"] == "CatalogFolderCollection" and c["folder"]:
++            folder_images[c["uuid"]] = {iu for iu, l in loc_of_image.items() if l == c["location"]}
++            # The folder's own name, as Capture One shows it; a volume root is named by its path.
++            d = c["folder"].rstrip("/") if len(c["folder"]) > 1 and not (WINDOWS and len(c["folder"]) == 3) else c["folder"]
++            folder_name[c["uuid"]] = d.rsplit("/", 1)[-1] if "/" in d.rstrip("/") else c["folder"]
+     return {"locations": loc, "images": images, "variants": variants, "collections": cols, "albums": albums,
+-            "folders": folders, "folder_parent": folder_parent,
++            "album_images": album_images, "album_parent": album_parent,
++            "folders": folders, "folder_parent": folder_parent, "folder_images": folder_images,
++            "folder_name": folder_name,
+             "format": q("SELECT ZFORMAT FROM ZVERSIONINFO ORDER BY ZVERSION DESC, Z_PK DESC LIMIT 1")[0][0],
+             "document_uuid": q("SELECT ZDOCUMENTUUID FROM ZDOCUMENTCONTENT LIMIT 1")[0][0]}
+ 
+@@ -310,12 +336,37 @@ def main(argv: list[str]) -> int:
+                    "; ".join(f"{u}: {sdk_vars.get(u)} vs {oc['variants'][u]}" for u in bad_meta[:5]))
+         ok, cl = host.call("collections.list", {"library": L})
+         cols = {c["uuid"]: c for c in cl["collections"]}
+-        report["collections"] = [{k: c.get(k) for k in ("uuid", "kind", "title", "parent", "image_count")} for c in cl["collections"]]
++        report["collections"] = [{k: c.get(k) for k in ("uuid", "kind", "title", "parent", "image_count", "folder")}
++                                 for c in cl["collections"]]
+         bad_album = [u for u, n in oc["albums"].items() if u not in cols or cols[u].get("image_count") != n]
+         checks.add(f"catalog: {len(oc['albums'])} albums, each with Capture One's image count", not bad_album,
+                    "; ".join(f"{u}: {cols.get(u, {}).get('image_count')} != {oc['albums'][u]}" for u in bad_album[:5]))
++        root_uuid = next((c["uuid"] for c in cl["collections"] if c.get("kind") == "root"), None)
++
++        def members(collection: str) -> set:
++            ok_, pg = host.call("images.list", {"library": L, "collection": collection, "limit": 100000})
++            return {i["uuid"] for i in pg.get("images", [])} if ok_ else {"<error>"}
++
++        bad_members = [u for u, s in oc["album_images"].items() if u in cols and members(u) != s]
++        checks.add("catalog: every album holds the same images as in Capture One", not bad_members,
++                   "; ".join(cols[u].get("title", u) for u in bad_members[:5]))
++        bad_place = [u for u, p in oc["album_parent"].items()
++                     if u in cols and cols[u].get("parent") != (p if p is not None else root_uuid)]
++        checks.add("catalog: every album sits where it does in Capture One (top level or its album group)",
++                   not bad_place, "; ".join(f"{cols[u].get('title')}: parent {cols[u].get('parent')}" for u in bad_place[:5]))
++        report["albums"] = [{"title": cols[u].get("title"), "image_count": cols[u].get("image_count"),
++                             "parent": cols.get(cols[u].get("parent"), {}).get("title")} for u in oc["albums"] if u in cols]
+         bad_folder = [u for u in oc["folders"] if u not in cols or cols[u].get("kind") != "folder"]
+         checks.add(f"catalog: {len(oc['folders'])} folders", not bad_folder, str(bad_folder[:5]))
++        bad_fpath = [u for u, d in oc["folders"].items() if u in cols and cols[u].get("folder") != d]
++        checks.add("catalog: every folder's path equals the independent resolution", not bad_fpath,
++                   "; ".join(f"{cols[u].get('folder')} != {oc['folders'][u]}" for u in bad_fpath[:5]))
++        bad_fname = [u for u, n in oc["folder_name"].items() if u in cols and cols[u].get("title") != n]
++        checks.add("catalog: every folder's name (non-ASCII included)", not bad_fname,
++                   "; ".join(f"{cols[u].get('title')!r} != {oc['folder_name'][u]!r}" for u in bad_fname[:5]))
++        bad_fimg = [u for u, s in oc["folder_images"].items() if u in cols and members(u) != s]
++        checks.add("catalog: every folder holds the same images as in Capture One", not bad_fimg,
++                   "; ".join(str(cols[u].get("title")) for u in bad_fimg[:5]))
+         bad_parent = [u for u, p in oc["folder_parent"].items() if u in cols and cols[u].get("parent") != p]
+         checks.add("catalog: folder tree (each folder under the nearest folder above it)", not bad_parent,
+                    "; ".join(f"{u}: parent {cols[u].get('parent')} != {oc['folder_parent'][u]}" for u in bad_parent[:5]))
+-- 
+2.43.0
+

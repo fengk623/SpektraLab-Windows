@@ -12,7 +12,10 @@
 #
 # What it cannot tell: anything about Capture One. There is no Capture One on a
 # hosted runner, so reading a real catalog and session is the manual acceptance
-# in docs/validation/ (RFC-W002 §6.2).
+# recorded in vendor/spklib/windows/ACCEPTANCE.md (RFC-W002 §6.2).
+#
+# The test count and the release binary's size and SHA-256 are also written as
+# notices on the run, so they can be read without downloading the log.
 
 name: spklib helper (Windows)
 
@@ -81,13 +84,28 @@ jobs:
 
       - name: Build and test
         shell: cmd
-        run: spklib\build-windows.cmd test
+        run: |
+          call spklib\build-windows.cmd test > build-test.log 2>&1
+          set rc=%errorlevel%
+          type build-test.log
+          exit /b %rc%
+
+      - name: Test count as a notice
+        if: always()
+        shell: bash
+        run: echo "::notice title=spklib-tests (Windows)::$(grep -aE '^[0-9]+ passed, [0-9]+ failed' build-test.log | tail -1)"
 
       - name: Release build
         shell: cmd
         run: |
           spklib\build-windows.cmd release || exit /b 1
           type spklib\build\windows-x64\release\spklib-host.exe.sha256
+
+      - name: Release size and SHA-256 as a notice
+        shell: bash
+        run: |
+          exe=spklib/build/windows-x64/release/spklib-host.exe
+          echo "::notice title=spklib-host.exe (release)::$(stat -c %s "$exe") bytes, SHA-256 $(sha256sum "$exe" | cut -d' ' -f1), SPKLIB_COMMIT $SPKLIB_COMMIT"
 
       # Once a binary is vendored, the release build must reproduce it byte for byte.
       - name: The release build is the vendored binary

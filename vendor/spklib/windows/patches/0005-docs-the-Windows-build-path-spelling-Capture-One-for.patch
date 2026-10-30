@@ -1,0 +1,182 @@
+From d203db8a5ff833d78ceb673580a34ca8a0ce2617 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 30 Oct 2026 11:04:52 -0500
+Subject: [PATCH 5/5] docs: the Windows build, path spelling, Capture One for
+ Windows, first session findings
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- README: building on Windows with llvm-mingw (fetch.py, build-windows.cmd
+  test/release, the real-catalog pass, tests/c1_acceptance.py), the UTF-8
+  manifest and '/' path spelling.
+- API-SPEC: 0.3.2 -- no method changes; on Windows paths come back with '/'
+  and a drive root as C:/; ZWINROOT, else ZMACROOT (offline); Windows 10
+  1903 or later.
+- CAPTURE-ONE-CATALOG: "Capture One for Windows", from a throwaway 16.6.4
+  catalog: the package as a plain folder with a writelock file, ZWINROOT
+  and backslashes, ZPARENT -1, folder rows without a name, album groups,
+  the colour-tag indices seen, and the snapshot copy under Windows' locks.
+- DESIGN: NFC is done on Windows (NormalizeString); Linux stays identity.
+- SESSION-DESIGN §6: partial answers to Q1-Q4 from a throwaway 16.6.4
+  session on Windows (ZDOCUMENTTYPE 0, the role pointers on the root row,
+  relative role folders, no writelock in the session folder, the .cos
+  layout with Basic_Rating and Color_Tag_Index under <VAR><AL>). The
+  verification script stays the plan; sessions are still probe-only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ API-SPEC.md                 |  8 +++++++-
+ README.md                   | 19 +++++++++++++++++++
+ docs/CAPTURE-ONE-CATALOG.md | 23 +++++++++++++++++++++++
+ docs/DESIGN.md              |  3 ++-
+ docs/SESSION-DESIGN.md      | 28 ++++++++++++++++++++++++++++
+ 5 files changed, 79 insertions(+), 2 deletions(-)
+
+diff --git a/API-SPEC.md b/API-SPEC.md
+index b5f837e..d95e50b 100644
+--- a/API-SPEC.md
++++ b/API-SPEC.md
+@@ -2,7 +2,7 @@
+ 
+ | | |
+ |---|---|
+-| **Version** | 0.3.1: `abi` 1, library `schema` 3 (`sdk.version` reports them) |
++| **Version** | 0.3.2: `abi` 1, library `schema` 3 (`sdk.version` reports them) |
+ | **Transports** | the C ABI in `include/spklib/spklib.h`, and `spklib-host` over stdio. One method table serves both |
+ | **Licence** | MIT, like the rest of this repository |
+ | **Used by** | SpektraLab 2.0, which bundles `spklib-host` as a helper; see its `API-SPEC-library-helper.md` for how the app runs its library on this API |
+@@ -26,6 +26,12 @@ file is gone and never touches a file, and the kind `pair` for a `.spektrapair`
+ description file, listed as a row like any picture). A 0.3.0 helper opens the
+ same libraries; it calls such a row `other`.
+ 
++**0.3.2** (schema 3, abi 1, no method changes): the Windows port. On Windows every path spklib returns
++is spelled with `/` between components and a drive root as `C:/` (a UNC root as `//server/share/`);
++paths it is given may use either separator. Capture One for Windows' catalogs resolve through
++`ZWINROOT`; a Mac-made catalog read on Windows (no `ZWINROOT`) resolves through `ZMACROOT` and is
++reported offline, as a Windows-made catalog is on a Mac. The helper needs Windows 10 1903 or later
++(its manifest selects the UTF-8 code page).
+ 
+ One surface, two transports:
+ 
+diff --git a/README.md b/README.md
+index 643c778..4281abb 100644
+--- a/README.md
++++ b/README.md
+@@ -21,6 +21,25 @@ build/spklib-host probe "<catalog>.cocatalog"
+ You need Xcode's clang and the system SQLite. CMake and package managers are not used.
+ nlohmann/json 3.12.0 is vendored in `third_party/` (MIT).
+ 
++On Windows (x64, Windows 10 1903 or later), with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
++unpacked anywhere (nothing is installed):
++
++```
++python third_party\sqlite\fetch.py      SQLite's amalgamation, checked against sqlite.org's SHA3-256
++set LLVM_MINGW=C:\path\to\llvm-mingw-20261006-ucrt-x86_64
++build-windows.cmd                         build\windows-x64\: libspklib.a, spklib-host.exe, spklib-tests.exe
++build-windows.cmd test                    build and run the tests (TMP and TEMP inside build\)
++build-windows.cmd release                 build\windows-x64\release\spklib-host.exe and its .sha256
++set SPKLIB_C1_CATALOG=D:\Pictures\Test Catalog
++build\windows-x64\spklib-tests.exe
++python tests\c1_acceptance.py --host build\windows-x64\release\spklib-host.exe --catalog "<catalog>" --session "<session>" --work <new folder>
++```
++
++The helper is one static executable with SQLite compiled in. Its manifest selects the UTF-8 code page,
++so every path it takes and returns is UTF-8; it returns them with `/` between components
++(`C:/Users/…`), which every Windows file API accepts. `release` builds without a timestamp or local
++paths, so the same sources and toolchain give the same bytes.
++
+ | Document | What it covers |
+ |---|---|
+ | `docs/DESIGN.md` | The boundary, the schema, who owns which column, licensing |
+diff --git a/docs/CAPTURE-ONE-CATALOG.md b/docs/CAPTURE-ONE-CATALOG.md
+index 6a9bb4c..d37b699 100644
+--- a/docs/CAPTURE-ONE-CATALOG.md
++++ b/docs/CAPTURE-ONE-CATALOG.md
+@@ -95,6 +95,29 @@ points SpektraLab at a folder's new place without touching Capture One.
+ | `ZPROCESSHISTORY` (552), `ZENABLEDOUTPUTRECIPE`, `ZCAPTUREPILOT`, `ZSELECTEDVARIANTS`, `ZCOMPAREVARIANTS`, `ZDOCUMENTSETTING`, `ZSIDECAR` | Capture One's own export history and UI state. |
+ | `ZIMAGE.ZMULTISHOT_*`, `ZASSISTEDREVIEW_*`, `ZRAWFILE*HASH` | Not needed for 2.0. The quick hash could later identify a file across disks, but `Sidecar.swift` records why content is not identity: byte-identical files are not the same photograph. |
+ 
++## Capture One for Windows
++
++Diagnosed 2026-10-28/30 on a throwaway catalog and session made by **Capture One 16.6.4 for Windows**
++(`ZVERSIONINFO`: `16.6.4.3044 for Phase One Win`, compatible version 1667) with six images in two
++folders, one with a non-ASCII name. The tables and columns are the Mac's; what differs is how paths
++and parents are written:
++
++| What | Capture One for Windows | spklib (0.3.2) |
++|---|---|---|
++| The package | a plain folder `<Name>/` (no `.cocatalog` suffix) holding `<Name>.cocatalogdb`, `Adjustments/`, `Cache/`, `Originals/` and a `writelock` file while Capture One has it open | `capture_one::locate` finds the one `.cocatalogdb` in the folder either way; `writelock` is never opened |
++| Journal | `journal_mode=delete`, as on the Mac | unchanged |
++| `ZPATHLOCATION` | `ZWINROOT` `C:\`, `ZMACROOT` empty, `ZRELATIVEPATH` with `\` (`Users\<user>\Pictures\Day1`); one row per folder level, including the drive itself (`ZRELATIVEPATH` empty) | on Windows the root is `ZWINROOT` (`C:\` → `C:/`, `\` → `/`); empty `ZWINROOT` falls back to `ZMACROOT`. Elsewhere `ZMACROOT`, as before |
++| `ZPARENT` | **-1** on the root `ProjectCollection`, All Images, Trash, In Catalog and the top folder (the drive); albums at the top level point at the root (1) | -1 is "no parent": the root is never its own parent and -1 is not counted in `parents_repaired`; folders hang under the nearest folder above them, as with a missing parent row |
++| Folder rows | `CatalogFolderCollection` with `ZNAME` NULL, one per `ZPATHLOCATION` folder | named after the folder (`Day2 子文件夹`), the drive by its path (`C:/`) |
++| Album groups | a group ("Trips") is a `VirtualFolderCollection` under the root; an album in it points at it | `group`, the album under it |
++| Ratings, colour tags | `ZVARIANTMETADATA` on the combined layer, as on the Mac (red 1, yellow 3, green 4, blue 5, pink 6) | unchanged |
++
++Windows' file locks are mandatory: while Capture One holds SQLite's write locks, reading the bytes
++SQLite locks (at 1 GiB, in a page SQLite never uses for data) fails. Only a database larger than 1 GiB
++has that page. The snapshot copy opens the database with `CreateFileW` sharing read, write and delete,
++and writes zeros for that page (its size from the header) instead of reading it; the copy is then
++opened through a `file:///C:/…?mode=ro&immutable=1` URI.
++
+ ## How it is read without risk
+ 
+ 1. `capture_one::locate` finds `<Name>.cocatalogdb` in the package.
+diff --git a/docs/DESIGN.md b/docs/DESIGN.md
+index 3ad0408..c031b60 100644
+--- a/docs/DESIGN.md
++++ b/docs/DESIGN.md
+@@ -176,7 +176,8 @@ The method table is the same in both, by construction: the host is a client of t
+ - Capture One sessions: verify the `.cosessiondb` schema and the `.cos` keys on a throwaway session
+   (SESSION-DESIGN.md §6), then implement the read side: snapshot + `.cos`, a files pass, a full pass.
+ - Mapping Capture One's crop/rotation into SpektraLab's geometry: format unverified, kept raw.
+-- Unicode NFC off Apple platforms; a Windows/Linux port needs it before it ships.
++- Unicode NFC on Linux (identity today; Linux is not shipped). Windows uses `NormalizeString`
++  (0.3.2).
+ - Capture One smart-album criteria are stored but not evaluated.
+ - Native sessions: no favourites, no folder renaming or creation methods yet (SESSION-DESIGN.md §5),
+   and no `outside_session` warnings beyond `session.folders` reporting it.
+diff --git a/docs/SESSION-DESIGN.md b/docs/SESSION-DESIGN.md
+index fc51af4..3888911 100644
+--- a/docs/SESSION-DESIGN.md
++++ b/docs/SESSION-DESIGN.md
+@@ -452,6 +452,34 @@ What the docs do not settle:
+ 9. Whether a linked session may later be merged into a SpektraLab catalog. Capture One allows
+    session → catalog [D]. This is out of v2.0.0.
+ 
++**Findings so far (Capture One 16.6.4 for Windows, 2026-10-30).** A throwaway session `SpkProbe Session`
++(Blank template), three images imported into Capture, one rated 2, one rated 5 with the pink tag, an
++album holding one image; read from a byte copy of the db. These are partial answers; the
++verification script below is still the plan, and the read side waits for it.
++
++- Q1: `ZDOCUMENTTYPE` is **0** for the session (1 for a catalog) and `ZDOCUMENTUUID` is set. The
++  tables are the catalog's (21 of them). The four roles are not entities: the root `ProjectCollection`
++  points at them with `ZCAPTUREDESTINATIONLOCATION`, `ZSELECTSDESTINATIONLOCATION`,
++  `ZPROCESSDESTINATIONLOCATION` (Output) and `ZTRASHDESTINATIONLOCATION`, and at their folder rows
++  with `ZCAPTURECOLLECTION`, `ZPROCESSCOLLECTION` and `ZTRASHCOLLECTION`. Folders are
++  `FolderCollection` rows (`ZPARENT` -1, `ZNAME` NULL, one per role folder) whose membership *is*
++  stored in `ZIMAGEINCOLLECTION`; the Session Folders list is `SessionFolderCollection` rows; All
++  Images and "5 stars" are `SmartCollection` rows with criteria; albums are `AlbumCollection`.
++  Favorites were not created.
++- Q2: the role folders are `ZISRELATIVE = 1`, `ZRELATIVEPATH` `Capture`, `Selects`, `Output`,
++  `Trash`, `ZWINROOT` and `ZMACROOT` empty: relative to the session folder. A nested folder (to see
++  the separator) was not made.
++- Q3: on Windows no writelock file appears in the session folder while it is open (a catalog has
++  one in its package).
++- Q4: one `.cos` per image, `Capture/CaptureOne/Settings166/<file name>.cos`: XML, `<IMG>` with the
++  image's `UUID`, then one `<VAR>` per variant with the variant's `UUID`, a `<DL>` (adjustments) and
++  an `<AL>` holding `Basic_Rating` and `Color_Tag_Index` (absent when unset). The db holds the same
++  values on the combined layer. Previews are in `CaptureOne/Cache/Proxies` (`.cop`, `.cof`) and
++  `CaptureOne/Cache/Thumbnails` (`<file>.[<variant uuid>].cot`). Keywords and second variants were
++  not tried.
++- `capture_one.probe` on this session reports 3 images, 3 variants, 2 rated, 1 colour-tagged, which
++  is what Capture One shows; `capture_one.link` answers `unsupported`.
++
+ **Verification script.** Run it in Capture One 16.8 on the owner's Mac with a **throwaway** session,
+ never a real one. Every db read uses the snapshot procedure.
+ 
+-- 
+2.43.0
+

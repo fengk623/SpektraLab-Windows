@@ -4,7 +4,7 @@ title: Windows 上读取 Capture One 图库：spklib 辅助程序的 Windows 版
 status: Review
 owner: fengk623
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-30
 baseline: 368d1974943a4a4982339fd355a859cad74e69a4
 rfcs: [RFC-W002]
 ---
@@ -56,7 +56,7 @@ rfcs: [RFC-W002]
 
 - A1 本机 `build-windows.cmd test`：spklib-tests 全部通过（记录用例数）。
 - A2 CI `spklib-windows.yml`（windows-latest）：补丁应用到 `afafee6` 后构建、测试通过，release 构建与入库的 exe 逐字节一致。
-- A3 `tests/c1_acceptance.py`，在 Capture One 关闭时对测试目录与测试会话运行：全部检查通过（probe 计数、每张图路径、文件存在、废纸篓、每个变体的星级与色标、每个相册的图片数、文件夹树、目录与会话文件的前后清点一致）。
+- A3 `tests/c1_acceptance.py`，在 Capture One 关闭时对测试目录与测试会话运行：全部检查通过（probe 计数、每张图路径、文件存在、废纸篓、每个变体的星级与色标、每个相册的图片（数量与具体哪几张）及其所在的相册组、每个文件夹的路径、名称、图片与上下级、目录与会话文件的前后清点一致）。记录在 `vendor/spklib/windows/ACCEPTANCE.md`。
 - A4 spklib-tests 的真实目录一轮（`SPKLIB_C1_CATALOG`）：全部通过，包括“the Capture One package is exactly as it was”。
 - A5 Capture One 打开测试目录时再跑一次 probe 与读取：成功；文件清点的差异如实记录（Capture One 自己会写）。
 - A6 先红后绿：`ZPARENT -1` 的测试在旧代码上失败（3 处），在新代码上通过。
@@ -69,6 +69,7 @@ rfcs: [RFC-W002]
 
 - 2026-10-28 · 工具链用 llvm-mingw 便携版，放在 `_local_spklib_validation` 内，不安装 · fengk623 · 本机没有任何 C++ 编译器，安装 Visual Studio 会改动该文件夹之外的系统。
 - 2026-10-28 · Windows 上路径统一用 `/` · Claude（待审核） · 一套字符串运算覆盖三个平台，macOS/Linux 的行为逐字节不变。
+- 2026-10-30 · 验收脚本加查相册的具体图片与位置、文件夹的路径、名称与图片 · Claude（待审核） · 需求里的“文件夹结构”与相册不只是计数。
 
 ## 9. 待决问题（Open questions）
 

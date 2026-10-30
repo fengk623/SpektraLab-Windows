@@ -1,7 +1,7 @@
 From 3fa3f7e2dc3eeeeab2c222dbf48c3a987f374567 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Wed, 28 Oct 2026 23:28:32 -0500
-Subject: [PATCH 1/3] feat(windows): spklib builds and runs on Windows -- a
+Subject: [PATCH 1/5] feat(windows): spklib builds and runs on Windows -- a
  platform layer, Windows paths and Capture One for Windows' roots
 
 What differs between macOS, Linux and Windows now lives in src/platform.hpp:
