@@ -1111,7 +1111,7 @@ Added 2026-10-28 on `Windows_Linux`; `main` does not carry this section.
 - **Integration:** work in the local folder and on `windows2` in the user's
   fork `fengk623/SpektraLab-Windows` (forked from
   `evanfan005-bit/SpektraLab-Windows`; baseline its `Windows_Linux` @
-  `4297621`). Push to `windows2`; the full CI runs on pushes to `windows2` and
+  `368d197`, as it was when the fork was made). Push to `windows2`; the full CI runs on pushes to `windows2` and
   on pull requests (`.github/workflows/desktop.yml`, `process.yml`). A merge
   happens only through a pull request the user reviews and submits personally.
   Never push to JamesQiu2005's `main` / `Windows_Linux` or to evanfan005-bit's

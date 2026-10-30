@@ -139,7 +139,7 @@
 ## 8. 分支、提交与合并
 
 - Windows / Linux 工作只进 `Windows_Linux` 一线，不进 `main`（`README.md:153-163`）。
-- **仓库与分支**：上游 `JamesQiu2005/SpektraLab` → 协作者的 fork `evanfan005-bit/SpektraLab-Windows`（现行版本参照，`Windows_Linux` @ `4297621`）→ 用户的 fork `fengk623/SpektraLab-Windows`，开发分支 `windows2`。开发只在本地文件夹与 `windows2` 上进行。
+- **仓库与分支**：上游 `JamesQiu2005/SpektraLab` → 协作者的 fork `evanfan005-bit/SpektraLab-Windows`（现行版本参照，`Windows_Linux` @ `368d197`，即用户 fork 建立时的版本）→ 用户的 fork `fengk623/SpektraLab-Windows`，开发分支 `windows2`。开发只在本地文件夹与 `windows2` 上进行。
 - **不碰别人的分支**：不修改、不推送 `JamesQiu2005/SpektraLab` 的 `main` 与 `Windows_Linux`，也不修改 `evanfan005-bit` 的任何分支（用户指示，2026-10-28 22:35 CDT）。
 - **基线 fork 的规则不沿用**：`4297621` 的 `AGENTS.md:3-20`（`aed5fd9`）要求直接推送到该 fork 的 `Windows_Linux`、CI 只手动触发、不开 PR；那是 evanfan005-bit 的 fork 的流程，本项目按本节（[reference-audit](../reference-audit.md) G-04）。
 - **合并**：开发 → 本地验证 → 推送到 `windows2` → CI → 用户审核批准 → 用户本人提 PR。未经批准不合并，不对他人可能已读取的分支 rebase 或强推（`CONTRACT-frontend-backend.md:148-174`）。

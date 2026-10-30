@@ -5,7 +5,7 @@ status: Review
 owner: Sizhi
 created: 2026-10-28
 updated: 2026-10-28
-baseline: 4297621a7b150595de9dcb1beafbe7645b0f8076
+baseline: 368d1974943a4a4982339fd355a859cad74e69a4
 prd: "none: 开发流程与 CI 是工程基础设施，没有用户可见的功能"
 tests:
   - tools/process/tests/test_check_process.py
@@ -19,7 +19,7 @@ tests:
 
 ## 2. 现状与动机（Context）
 
-基线：evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22 +0800），即上游 `1e727cd`（合并 PR #23）再加该 fork 的 5 个提交。下面的历史回放截至 `1e727cd`；那 5 个提交中的 3 个非合并提交另作回放（§6.3）。行号以 `4297621` 为准。
+基线：evanfan005-bit/SpektraLab-Windows 的 `Windows_Linux` @ `368d1974943a4a4982339fd355a859cad74e69a4`（2026-10-29 11:53 +0800；用户 fork 建立时的版本，比下面的 `4297621` 多 1 个只改 RAW 解码与预览提示的提交）。逐条复核与回放基于 `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22 +0800），即上游 `1e727cd`（合并 PR #23）再加该 fork 的 5 个提交。下面的历史回放截至 `1e727cd`；那 5 个提交中的 3 个非合并提交另作回放（§6.3）。行号以 `4297621` 为准。
 
 - **上游有流程，但文档不入库。** 上游先写 PRD、RFC 再编码，代码注释大量引用 `RFC-014`、`RFC-018` 等；但 `.gitignore:329-330` 把 `/rfc/`、`/PRD/` 设为本机保存（2026-10-13 起），协作者看不到。Windows 侧的设计记录散落在 `engine/WINDOWS_*.md`、`desktop/NOTES.md` 等处，格式各异，没有索引和状态。
 - **“接口变更同一提交改规范”只靠自觉。** 规则见 `AGENTS.md:81-87`、`ARCHITECTURE.md:662-665`、`desktop/HOST-PROTOCOL.md:15-17`。按本 RFC 的规则回放 `Windows_Linux` 上提交时间在 2026-09-11 00:00（+0800）之后、截至 `1e727cd` 的 343 个非合并提交（§6.3）：
@@ -106,7 +106,7 @@ tests:
 
 对比只按文件触发：同一时期改过 `params.cpp` 的提交 22 个，改过 `main.cpp` 或 `protocol.ts` 的 12 个。`wire-schema` 未同步的 9 次里，5 个字段名到 `4297621` 仍不在 API-SPEC（§2），是真实偏差。`host-protocol` 未同步的 4 次里只有 1 次是真遗漏，另 3 次是前端类型追上已有文档，需要豁免；这是按文件触发 `protocol.ts` 的代价，接受它，因为那 1 次遗漏正是增量变更（§3.3）。
 
-**基线 fork 的提交。** `1e727cd..4297621` 的 3 个非合并提交（`aed5fd9`、`bbf536d`、`ec59666`）按同样方式回放（对比各自父提交）：`wire-schema`、`wire-schema-parity` 都未触发；`host-protocol` 在 `ec59666` 触发（`protocol.ts`），同一提交改了 `desktop/HOST-PROTOCOL.md`，即上面那 1 次遗漏的补救。把窗口延到 `4297621`（346 个非合并提交），上表三行（触发 / 同步 / 未改）变为 20/11/9、19/17/2、10/6/4。整段 `1e727cd..4297621` 作为一个范围时，`host-protocol` 触发且已同步，`kFields` 没有变化；另有 `ci-gates-doc` 触发（`aed5fd9` 改了工作流），那时还没有流程文档，规则不适用于这段历史。可用 `python tools/process/check_process.py sync --base <提交>^ --head <提交>` 逐个复现触发数。
+**基线 fork 的提交。** `1e727cd..4297621` 的 3 个非合并提交（`aed5fd9`、`bbf536d`、`ec59666`）按同样方式回放（对比各自父提交）：`wire-schema`、`wire-schema-parity` 都未触发；`host-protocol` 在 `ec59666` 触发（`protocol.ts`），同一提交改了 `desktop/HOST-PROTOCOL.md`，即上面那 1 次遗漏的补救。把窗口延到 `4297621`（346 个非合并提交），上表三行（触发 / 同步 / 未改）变为 20/11/9、19/17/2、10/6/4。整段 `1e727cd..4297621` 作为一个范围时，`host-protocol` 触发且已同步，`kFields` 没有变化；另有 `ci-gates-doc` 触发（`aed5fd9` 改了工作流），那时还没有流程文档，规则不适用于这段历史。可用 `python tools/process/check_process.py sync --base <提交>^ --head <提交>` 逐个复现触发数。 之后的 `368d197`（用户 fork 建立时的最新提交）同样回放：0 条规则触发，没有 `Gate:` 行（警告）。
 
 ### 6.4 门禁
 
@@ -137,6 +137,7 @@ tests:
 - 2026-10-28 · 集成暂存分支定名 `windows_linux2`（从 `Windows_Linux` 分出） · 用户指示（2026-10-28 22:08 CDT）。
 - 2026-10-28 · 改为在用户自己的 fork 开发：从 `evanfan005-bit/SpektraLab-Windows` fork 到 `fengk623/SpektraLab-Windows`，开发分支 `windows2`，基线改为该 fork 的 `Windows_Linux` @ `4297621`；不再向 `JamesQiu2005/SpektraLab` 推送（此前建的 `windows_linux2` 留在原处：仓库规则禁止删分支，用户也禁止删除） · 用户指示（2026-10-28 22:35 CDT）。
 - 2026-10-28 · `desktop.yml` 在 `windows2` 的推送与 PR 上自动运行，其他分支沿用 `aed5fd9` 的只手动 · 用户要求配置 CI；该 fork 改为手动是为了日常推送不跑 CI，`windows2` 是要拿 CI 结果做批准依据的那条分支。
+- 2026-10-30 · `windows2` 以 `368d197` 为基（用户 fork 建立时的 `Windows_Linux`，比 `4297621` 多 1 个提交） · 用户在 2026-10-30 建立 fork；“现版本参照 evanfan005-bit/SpektraLab-Windows”。该提交不涉及流程文档、规范与工作流，被它改动的文件里本 RFC 与审计只有一处引用移动（`Canvas.tsx` 行号 +2）。
 - 2026-10-28 · 撤下第一版的 `c-abi` 规则；补齐 DOC000、AUD000、AUD002、SYN003 的测试；回放窗口改为明确的起始时刻（343 个提交） · 独立核查发现：上游没有 C ABI 同步规则，四个结果代码屏蔽后测试仍全绿，`--since` 带当前时刻导致计数随运行时间变化。
 - 2026-10-28 · `desktop-checks-windows` 不阻塞打包任务 · 让 Windows 上的平台问题可见，又不因新增检查把已有的打包证据一起挡住。
 

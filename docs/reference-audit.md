@@ -16,7 +16,8 @@
 |---|---|
 | 仓库 URL | 上游 https://github.com/JamesQiu2005/SpektraLab；基线所在 fork https://github.com/evanfan005-bit/SpektraLab-Windows；开发 fork https://github.com/fengk623/SpektraLab-Windows（开发分支 `windows2`） |
 | UI 与规范参考分支 | `main` @ `fd891c6bc5eb350387602deb5c1ef9b6dcdab948`（2026-10-28 11:10:50 +0800，“feat(film): Don't Apply Film Simulation in the Film section's menu”）；上游的 `main`，本地 `origin/main`（evanfan005-bit/SpektraLab-Windows）也是这个 SHA |
-| 本项目基线分支 | evanfan005-bit/SpektraLab-Windows `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22:11 +0800，“Merge upstream PR #23 with local memory and native no-film fixes”）：上游 `1e727cd` 加 evanfan005-bit 的 5 个提交（`eb6a4b6`、`aed5fd9`、`bbf536d`、`ec59666`、合并 `4297621`；`git log --oneline 1e727cd..4297621`）；`git diff --stat 1e727cd 4297621`：72 个文件 +3535/−752，没有删除文件 |
+| 本项目基线分支 | evanfan005-bit/SpektraLab-Windows `Windows_Linux` @ `368d1974943a4a4982339fd355a859cad74e69a4`（2026-10-29 11:53:41 +0800，“Support GFX100RF RAW and report failed film previews”），即用户 fork 建立时的 `Windows_Linux`，`windows2` 以它为基：下一行的 `4297621` 加 1 个提交，只改 RAW 解码与相机预览提示（`git diff --stat 4297621 368d197`：10 个文件 +306/−6，不涉及流程文档、规范与工作流；spec sync 回放 0 条规则触发）。被它改动的文件里，本审计只有一处引用移动：`desktop/src/canvas/Canvas.tsx` 第 472 行变为第 474 行（§5 第 18 条） |
+| 逐条复核时的基线 | evanfan005-bit/SpektraLab-Windows `Windows_Linux` @ `4297621a7b150595de9dcb1beafbe7645b0f8076`（2026-10-29 09:22:11 +0800，“Merge upstream PR #23 with local memory and native no-film fixes”）：上游 `1e727cd` 加 evanfan005-bit 的 5 个提交（`eb6a4b6`、`aed5fd9`、`bbf536d`、`ec59666`、合并 `4297621`；`git log --oneline 1e727cd..4297621`）；`git diff --stat 1e727cd 4297621`：72 个文件 +3535/−752，没有删除文件 |
 | 基线的父提交（上游） | JamesQiu2005/SpektraLab `Windows_Linux` @ `1e727cd6cbd25e0292013e3b4dbb6ac237c0231f`（2026-10-29 08:39:50 +0800，合并 PR #23）：`4297621` 的第二父提交（第一父提交是 `ec59666`）；本审计初版以它为基线 |
 | 分支关系 | `main` 是 `4297621` 的祖先（`git merge-base --is-ancestor origin/main 4297621` 成立，合并基准即 `fd891c6`）；`4297621` 领先 `main` 45 个提交、落后 0 个（`git rev-list --count origin/main..4297621`、`4297621..origin/main`），其中 40 个也在 `1e727cd` 里（`git rev-list --count origin/main..1e727cd`） |
 | 检查日期 | 2026-10-28（America/Chicago；UTC 2026-10-29） |
@@ -284,7 +285,7 @@ macOS 版的界面是信息架构与视觉语言的参考；具体做法在 Wind
 **Windows 平台习惯的缺口**
 
 17. **未变**（`Filmstrip.tsx` 未改）。胶片条没有 Shift-点击范围选择（`desktop/src/windows/Filmstrip.tsx`）。
-18. **未变**。精确式触控板的双指滑动被当作缩放，横向位移被忽略（`desktop/src/canvas/Canvas.tsx:472`，初版为第 479 行）。
+18. **未变**。精确式触控板的双指滑动被当作缩放，横向位移被忽略（`desktop/src/canvas/Canvas.tsx:474`；`4297621` 为第 472 行，初版为第 479 行）。
 19. **未变**。退出用 Ctrl+Q、设置用 Ctrl+,（`desktop/src/windows/menus.ts:81-83`），来自 macOS 习惯；命令行包装器装到 `%USERPROFILE%\.local\bin`（`desktop/src-tauri/src/agent_files.rs:55`）。
 20. **未变**。高 DPI（125% / 150%）、多显示器、广色域与 10 位显示链、非 NVIDIA GPU 尚未在真实硬件上验收（`engine/WINDOWS_FULL_MIGRATION_PLAN.md` §6）。
 
