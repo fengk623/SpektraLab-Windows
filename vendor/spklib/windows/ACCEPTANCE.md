@@ -9,7 +9,7 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 | 项 | 内容 | 状态 | 依据 |
 |---|---|---|---|
 | A1 | 本机 `build-windows.cmd test`，spklib-tests 全部通过 | 待运行 | 开发机上运行 `50-run-all.cmd`（见下） |
-| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建 | 通过（`3d32299`，补丁 0001–0003）；本次提交待 CI | run 41083264851：`git am`、llvm-mingw 与 SQLite 校验、`build-windows.cmd test`、`release` 全部成功。逐字节比较要等 exe 入库后才执行 |
+| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建 | 通过（`77aea7b`，补丁 0001–0005）；逐字节比较待 exe 入库 | run 41087191443（windows-latest）：`git am` 5 个补丁、llvm-mingw 与 SQLite 校验通过，spklib-tests **561 passed, 0 failed**；release `spklib-host.exe` 3,009,536 字节，SHA-256 `1c03400e81ae287077393ad5fbbc7aaf9a097d2664ff1a0935be16af7b204800`（`SPKLIB_COMMIT` d203db8a5ff8） |
 | A3 | `c1_acceptance.py`，Capture One 关闭，对测试目录与会话 | 待运行 | 预检见下（Linux 上对数据库副本，不能代替） |
 | A4 | spklib-tests 真实目录一轮（`SPKLIB_C1_CATALOG`） | 待运行 | 同 A1，由 `40-acceptance.cmd` 运行 |
 | A5 | Capture One 打开测试目录时再跑一次 | 待运行 | 文件清点的差异如实记录 |
