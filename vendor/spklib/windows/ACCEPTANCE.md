@@ -9,7 +9,7 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 | 项 | 内容 | 状态 | 依据 |
 |---|---|---|---|
 | A1 | 本机 `build-windows.cmd test`，spklib-tests 全部通过 | 通过（补丁 0001–0005） | 开发机 2026-10-30 12:50：`spklib 0.3.2+d203db8a5ff8`，**561 passed, 0 failed**（与 CI 相同） |
-| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建，release 可复现 | d203db8：构建与测试通过，可复现性找到原因并已修；补丁 0001–0008 待 CI | run 41087191443：spklib-tests 561 passed, 0 failed。run 41104617310：同一提交，runner 的默认检出（CRLF）与另一个文件夹里的 LF 检出各构建一次，**LF 那次与开发机逐字节相同**（`3956ba4a…`），CRLF 那次不同（`1c03400e…`）：差别全在 `.rsrc`，是按原样嵌入的 `host/spklib.manifest` 多了 23 个 CR。spklib `31ea13d` 用 `.gitattributes` 让所有检出都是 LF |
+| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建，release 可复现 | 通过（`6f4a926`，补丁 0001–0008，spklib `31ea13d`）；与开发机的逐字节比较待开发机重建 | run 41106555867（windows-latest）：spklib-tests **562 passed, 0 failed**；release `spklib-host.exe` 3,010,048 字节，SHA-256 `8d25dbc62b67ce52b73c689ed3e08fad09e64c6059c2a9ca8fcb7e66106d4e11`；runner 的默认检出与另一个文件夹里的 LF 检出各构建一次，**两次逐字节相同**（清单的 CRLF：0 与 0）。此前（`d203db8`，run 41104617310）CRLF 检出与 LF 检出不同，LF 那次与开发机逐字节相同（`3956ba4a…`），原因与修正见运行记录 1 |
 | A3 | `c1_acceptance.py`，Capture One 关闭，对测试目录与会话 | 通过 | 开发机 2026-10-30 12:52，release `spklib-host.exe`：**36 passed, 0 failed**（见运行记录 1） |
 | A4 | spklib-tests 真实目录一轮（`SPKLIB_C1_CATALOG`） | 未通过 → 已修，待重跑 | 621 passed, 3 failed：3 处都是测试自己的独立读取有误（见运行记录 1），spklib 的结果与 Capture One 一致。修正在 spklib `ddb470c`，待重跑 |
 | A5 | Capture One 打开测试目录时再跑一次 | 待运行 | 文件清点的差异如实记录 |
