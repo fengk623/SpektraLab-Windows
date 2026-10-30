@@ -23,7 +23,9 @@ class StopAtConfigure(Exception):
 class LensDependencyTests(unittest.TestCase):
     def configure(self, cross):
         with tempfile.TemporaryDirectory(prefix='spk lens setup ') as temporary:
-            root = Path(temporary)
+            # setup-lens-codecs.py resolves its paths; so does this test. A
+            # Windows runner's TEMP is an 8.3 short path that resolve() expands.
+            root = Path(temporary).resolve()
             prefix = root / 'target'
             argv = ['setup-lens-codecs.py', '--sources', str(root / 'sources'),
                     '--build', str(root / 'build'), '--install', str(prefix)]

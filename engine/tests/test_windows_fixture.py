@@ -22,7 +22,9 @@ class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # run_fixture resolves its paths; so does this test. A Windows runner's
+        # TEMP is an 8.3 short path (C:\Users\RUNNER~1\...) that resolve() expands.
+        self.root = Path(self.tmp.name).resolve()
         self.fixture = self.root / "fixture with spaces"
         self.manifest = wf.generate_fixture(self.fixture, size=6)
         self.resources = self.root / "resources"
