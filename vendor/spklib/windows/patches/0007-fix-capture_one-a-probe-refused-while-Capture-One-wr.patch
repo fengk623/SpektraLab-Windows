@@ -1,0 +1,67 @@
+From c474dff76250543f3313faea08debde416a86a1f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 30 Oct 2026 13:08:29 -0500
+Subject: [PATCH 7/8] fix(capture_one): a probe refused while Capture One
+ writes leaves no scratch folder
+
+capture_one.probe (and capture_one.link with a store, which probes first)
+made spklib-probe-<uuid> in the temp folder for its snapshot and removed it
+on success, but not when take_snapshot threw: a hot journal (source_busy) or
+an unreadable file left an empty spklib-probe-* folder behind each time.
+Seen on Windows: the acceptance run's TMP kept one after spklib-tests. Sync
+and copy already removed theirs; probe now does the same.
+
+Red before green: the busy-catalog test now counts spklib-probe-* folders in
+the temp folder before and after the refused probe. Old code: 1 != 0. New
+code: Linux suite 541 passed, 0 failed, and no probe folder is left.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ src/capture_one.cpp | 9 ++++++++-
+ tests/tests.cpp     | 8 ++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/src/capture_one.cpp b/src/capture_one.cpp
+index c66ce68..cf57401 100644
+--- a/src/capture_one.cpp
++++ b/src/capture_one.cpp
+@@ -532,7 +532,14 @@ Json probe(const std::string& path, const std::string& scratch_dir) {
+     std::error_code ec;
+     out["journal"] = nonempty_file(loc.database + "-journal") ? "hot" : "none";
+     out["wal"] = nonempty_file(loc.database + "-wal");
+-    Snapshot snap = take_snapshot(loc.database, scratch_dir);
++    Snapshot snap;
++    try {
++        snap = take_snapshot(loc.database, scratch_dir);
++    } catch (...) {
++        // A busy or unreadable catalog leaves no scratch folder behind (as sync and copy do).
++        fs::remove_all(scratch_dir, ec);
++        throw;
++    }
+     try {
+         Catalog cat = read(snap.path);
+         {
+diff --git a/tests/tests.cpp b/tests/tests.cpp
+index 7694395..bbb1133 100644
+--- a/tests/tests.cpp
++++ b/tests/tests.cpp
+@@ -926,7 +926,15 @@ static void synthetic() {
+         FakeCatalog fc(root);
+         Ctx c;
+         touch(fc.db.generic_string() + "-journal", "hot");
++        auto probe_dirs = [] {
++            int n = 0;
++            for (auto& e : fs::directory_iterator(fs::temp_directory_path()))
++                n += e.path().filename().string().rfind("spklib-probe-", 0) == 0;
++            return n;
++        };
++        int probe_dirs_before = probe_dirs();
+         CHECK_EQ(c.err("capture_one.probe", {{"path", fc.package.generic_string()}}), std::string("source_busy"));
++        CHECK_EQ(probe_dirs(), probe_dirs_before);  // a refused probe leaves no scratch folder
+         fs::remove(fc.db.generic_string() + "-journal");
+         std::string L = c("capture_one.link", {{"source", fc.package.generic_string()}, {"path", (root / "M").generic_string()}})["library"];
+         // Another catalog put where this one was.
+-- 
+2.43.0
+

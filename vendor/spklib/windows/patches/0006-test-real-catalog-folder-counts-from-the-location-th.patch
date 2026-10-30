@@ -1,0 +1,115 @@
+From ddb470cf617a026f0a3e406625e69226de379fc1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 30 Oct 2026 13:05:34 -0500
+Subject: [PATCH 6/8] test(real catalog): folder counts from the location; the
+ catalog's own most common camera
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The real-catalog pass (SPKLIB_C1_CATALOG) failed 3 checks on the Capture One
+16.6.4 for Windows test catalog, all in the test's own reading, none in spklib:
+
+- every collection / copy counts: the oracle counted a folder's images from
+  ZIMAGEINCOLLECTION. A Mac catalog lists folder members there (and they
+  agree with the locations); Capture One for Windows lists none, so the
+  oracle said 0 where the folders hold 3 (Day1, Day2 子文件夹). A folder's
+  images are now those whose location it is -- what spklib returns and
+  Capture One shows -- and an album's are still its ZIMAGEINCOLLECTION rows.
+- facets: the check looked up "NIKON Z 8", the owner's camera, and compared
+  -1 (absent) with 0. It now takes the catalog's most common camera model,
+  so any catalog can be the real one.
+
+docs/CAPTURE-ONE-CATALOG.md records the missing folder rows.
+
+Gate: Linux suite 540 passed, 0 failed. Real-catalog pass on the synthetic
+catalog: these checks pass (the two left failing are the synthetic catalog's
+missing creation dates, as before).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ docs/CAPTURE-ONE-CATALOG.md |  1 +
+ tests/tests.cpp             | 33 +++++++++++++++++++++------------
+ 2 files changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/docs/CAPTURE-ONE-CATALOG.md b/docs/CAPTURE-ONE-CATALOG.md
+index d37b699..4890cfc 100644
+--- a/docs/CAPTURE-ONE-CATALOG.md
++++ b/docs/CAPTURE-ONE-CATALOG.md
+@@ -109,6 +109,7 @@ and parents are written:
+ | `ZPATHLOCATION` | `ZWINROOT` `C:\`, `ZMACROOT` empty, `ZRELATIVEPATH` with `\` (`Users\<user>\Pictures\Day1`); one row per folder level, including the drive itself (`ZRELATIVEPATH` empty) | on Windows the root is `ZWINROOT` (`C:\` → `C:/`, `\` → `/`); empty `ZWINROOT` falls back to `ZMACROOT`. Elsewhere `ZMACROOT`, as before |
+ | `ZPARENT` | **-1** on the root `ProjectCollection`, All Images, Trash, In Catalog and the top folder (the drive); albums at the top level point at the root (1) | -1 is "no parent": the root is never its own parent and -1 is not counted in `parents_repaired`; folders hang under the nearest folder above them, as with a missing parent row |
+ | Folder rows | `CatalogFolderCollection` with `ZNAME` NULL, one per `ZPATHLOCATION` folder | named after the folder (`Day2 子文件夹`), the drive by its path (`C:/`) |
++| Folder membership | **no** `ZIMAGEINCOLLECTION` rows for folders (a Mac catalog lists them, and they agree with the locations) | a folder holds the images whose location it is, on every platform, as before |
+ | Album groups | a group ("Trips") is a `VirtualFolderCollection` under the root; an album in it points at it | `group`, the album under it |
+ | Ratings, colour tags | `ZVARIANTMETADATA` on the combined layer, as on the Mac (red 1, yellow 3, green 4, blue 5, pink 6) | unchanged |
+ 
+diff --git a/tests/tests.cpp b/tests/tests.cpp
+index 8177ddf..7694395 100644
+--- a/tests/tests.cpp
++++ b/tests/tests.cpp
+@@ -50,6 +50,18 @@ using spklib::Json;
+ // --- harness ---------------------------------------------------------------------------------
+ 
+ static int g_failed = 0, g_passed = 0;
++
++// An album holds the images ZIMAGEINCOLLECTION lists; a folder holds the images whose location it is.
++// (A Mac catalog also lists folder members in ZIMAGEINCOLLECTION, and the two agree; Capture One
++// 16.6 for Windows lists none, so the location is the one reading that holds for both.) Trashed
++// images are not counted, as Capture One does not show them.
++static const char* kC1CollectionCounts =
++    "SELECT c.ZUUID, CASE WHEN e.ZNAME = 'CatalogFolderCollection'"
++    " THEN (SELECT count(*) FROM ZIMAGE i WHERE i.ZIMAGELOCATION = c.ZFOLDERLOCATION AND i.ZISTRASHED = 0)"
++    " ELSE (SELECT count(*) FROM ZIMAGEINCOLLECTION ic JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"
++    " WHERE ic.ZCOLLECTION = c.Z_PK) END"
++    " FROM ZCOLLECTION c JOIN ZENTITIES e ON e.Z_ENT = c.Z_ENT"
++    " WHERE e.ZNAME IN ('AlbumCollection', 'CatalogFolderCollection')";
+ static std::string g_test;
+ 
+ #define CHECK(cond)                                                                                    \
+@@ -1765,11 +1777,7 @@ static void real_catalog(const std::string& package) {
+ 
+     run("every collection: kind, parent, count", [&] {
+         Json cols = c("collections.list", {{"library", L}})["collections"];
+-        auto s = o.prepare("SELECT c.ZUUID, count(ic.Z_PK) FROM ZCOLLECTION c JOIN ZENTITIES e ON e.Z_ENT = c.Z_ENT"
+-                           " LEFT JOIN ZIMAGEINCOLLECTION ic ON ic.ZCOLLECTION = c.Z_PK"
+-                           " LEFT JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"
+-                           " WHERE e.ZNAME IN ('AlbumCollection', 'CatalogFolderCollection') AND (ic.Z_PK IS NULL OR i.Z_PK IS NOT NULL)"
+-                           " GROUP BY c.Z_PK");
++        auto s = o.prepare(kC1CollectionCounts);
+         int64_t checked = 0, bad = 0;
+         while (s.step()) {
+             Json col = find_by(cols, "uuid", s.text(0));
+@@ -1840,8 +1848,13 @@ static void real_catalog(const std::string& package) {
+         for (auto& x : f["captured"]["days"]) days += x["count"].get<int64_t>();
+         CHECK_EQ(cams, visible);
+         CHECK_EQ(days + f["captured"]["undated"].get<int64_t>(), visible);
+-        CHECK_EQ(find_by(f["camera"], "value", "NIKON Z 8").is_null() ? int64_t(-1) : find_by(f["camera"], "value", "NIKON Z 8")["count"].get<int64_t>(),
+-                 n("SELECT count(*) FROM ZIMAGE WHERE ZISTRASHED = 0 AND ZCAMERA_MODEL = 'NIKON Z 8'"));
++        // The catalog's most common camera, whatever it is (any catalog can be the real one).
++        auto top = o.prepare("SELECT ZCAMERA_MODEL, count(*) FROM ZIMAGE WHERE ZISTRASHED = 0 AND COALESCE(ZCAMERA_MODEL, '') <> ''"
++                             " GROUP BY ZCAMERA_MODEL ORDER BY 2 DESC, 1 LIMIT 1");
++        if (top.step()) {
++            Json cam = find_by(f["camera"], "value", top.text(0));
++            CHECK_EQ(cam.is_null() ? int64_t(-1) : cam["count"].get<int64_t>(), top.i64(1));
++        }
+         std::printf("   facets in %.0f ms: %zu ratings, %zu cameras, %zu lenses, %zu days, %zu keywords\n", ms, f["rating"].size(),
+                     f["camera"].size(), f["lens"].size(), f["captured"]["days"].size(), f["keyword"].size());
+     });
+@@ -1950,11 +1963,7 @@ static void real_catalog(const std::string& package) {
+ 
+         // Albums and folders hold what Capture One's do; the import albums keep their times.
+         Json cols = c("collections.list", {{"library", CL}})["collections"];
+-        auto s2 = o.prepare("SELECT c.ZUUID, count(ic.Z_PK) FROM ZCOLLECTION c JOIN ZENTITIES e ON e.Z_ENT = c.Z_ENT"
+-                            " LEFT JOIN ZIMAGEINCOLLECTION ic ON ic.ZCOLLECTION = c.Z_PK"
+-                            " LEFT JOIN ZIMAGE i ON i.Z_PK = ic.ZIMAGE AND i.ZISTRASHED = 0"
+-                            " WHERE e.ZNAME IN ('AlbumCollection', 'CatalogFolderCollection') AND (ic.Z_PK IS NULL OR i.Z_PK IS NOT NULL)"
+-                            " GROUP BY c.Z_PK");
++        auto s2 = o.prepare(kC1CollectionCounts);
+         int64_t checked = 0, cbad = 0;
+         while (s2.step()) {
+             ++checked;
+-- 
+2.43.0
+

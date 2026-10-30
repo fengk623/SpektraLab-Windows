@@ -1,0 +1,39 @@
+From 31ea13d09d984f2349ae91ef2c1b33af9c1b3472 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 30 Oct 2026 13:22:22 -0500
+Subject: [PATCH 8/8] build: LF in every checkout, so a Windows clone builds
+ the same bytes
+
+The release build is meant to be reproducible: the same commit and toolchain
+give the same spklib-host.exe. On a Windows runner it did not match the
+developer PC's: same size, 1,191 bytes different, all in .rsrc. Git for
+Windows checks text out with CRLF (core.autocrlf=true), and
+host/spklib.manifest is embedded in the exe as it is on disk, so the CRLF
+checkout carried 23 more bytes of manifest. The same commit from an LF
+checkout, built in a folder with another name, gave the PC's bytes exactly
+(3956ba4a...), so nothing else in the binary depends on the machine.
+
+.gitattributes now checks every text file out with LF (cmd scripts keep
+CRLF, which cmd.exe needs). No file in the repository changes: they are all
+LF already.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EsiBMQLFocprcmVfDPxXCc
+---
+ .gitattributes | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/.gitattributes b/.gitattributes
+index 8517edc..5615c60 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -1,2 +1,6 @@
++# Every text file is checked out with LF on every machine, whatever core.autocrlf says: the
++# Windows build embeds host/spklib.manifest in the exe byte for byte, so a CRLF checkout would
++# build a different binary from the same commit. cmd.exe needs CRLF in its scripts.
++* text=auto eol=lf
+ *.cmd text eol=crlf
+ *.bat text eol=crlf
+-- 
+2.43.0
+

@@ -104,6 +104,7 @@ spklib 内部与对外都用 `/` 分隔的 UTF-8 字符串。Windows 上的根�
 - 2026-10-28 · Windows 上路径统一用 `/` · 见 §7。
 - 2026-10-28 · `ZPARENT = -1` 按“没有父行”放置，不算修复 · 实测数据（§2）。
 - 2026-10-28 · 锁字节页写零 · SQLite 不使用该页；Windows 锁是强制的。
+- 2026-10-30 · 文本文件一律以 LF 检出（spklib `.gitattributes`） · 清单按原样嵌入 exe，CRLF 检出会构建出不同的字节（CI 与开发机对比查明）；CI 每次构建两遍并逐字节比较。
 - 2026-10-30 · spklib 文档随补丁更新（0005：README、API-SPEC 0.3.2、CAPTURE-ONE-CATALOG 的 Windows 一节、SESSION-DESIGN §6 的初步答案） · MR 要自带说明，审阅者不必读本仓库。
 
 ## 10. 待决问题（Open questions）

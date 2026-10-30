@@ -65,7 +65,12 @@ jobs:
           set -euo pipefail
           cd spklib
           git -c user.name=ci -c user.email=ci@invalid am ../vendor/spklib/windows/patches/*.patch
-          git log --oneline -6
+          # git am wrote each file with this runner's line endings (CRLF) before the patch that sets
+          # eol=lf in .gitattributes; check every file out again under the final attributes, as a
+          # fresh clone of the merged repository would be.
+          git rm -rq --cached .
+          git reset -q --hard
+          git log --oneline -9
 
       - uses: actions/setup-python@v5
         with:
@@ -109,18 +114,19 @@ jobs:
           exe=spklib/build/windows-x64/release/spklib-host.exe
           echo "::notice title=spklib-host.exe (release)::$(stat -c %s "$exe") bytes, SHA-256 $(sha256sum "$exe" | cut -d' ' -f1), SPKLIB_COMMIT $SPKLIB_COMMIT"
 
-      # Reproducibility on this runner: the same sources checked out again with LF line endings
-      # (actions/checkout gives CRLF on Windows), in a folder with another name, built again.
-      # The two must be the same bytes; pe_diff.py says where they are not, and whether either is
-      # the developer PC's build (KNOWN_BUILDS in BUILD-INFO.env).
+      # Reproducibility on this runner: the same sources checked out again with core.autocrlf off,
+      # in a folder with another name, built again. The two must be the same bytes; pe_diff.py
+      # says where they are not, and whether either is a build made elsewhere (KNOWN_BUILDS in
+      # BUILD-INFO.env). This is how a CRLF checkout of host/spklib.manifest, embedded in the exe
+      # byte for byte, was found (spklib's .gitattributes now keeps every checkout LF).
       - name: A second release build from an LF checkout in another folder
         shell: bash
         run: |
           set -euo pipefail
           git -C spklib -c core.autocrlf=false -c core.eol=lf worktree add -q ../spklib-lf HEAD
           cp spklib/third_party/sqlite/sqlite3.c spklib/third_party/sqlite/sqlite3.h spklib/third_party/sqlite/sqlite3ext.h spklib-lf/third_party/sqlite/
-          crlf() { grep -c $'\r$' "$1" || true; }
-          echo "::notice title=line endings::src/library.cpp CRLF lines: checkout $(crlf spklib/src/library.cpp), LF worktree $(crlf spklib-lf/src/library.cpp)"
+          crlf() { python -c "import sys; print(open(sys.argv[1],'rb').read().count(b'\\r\\n'))" "$1"; }
+          echo "::notice title=line endings::host/spklib.manifest CRLF: checkout $(crlf spklib/host/spklib.manifest), LF worktree $(crlf spklib-lf/host/spklib.manifest)"
 
       - name: Build it
         shell: cmd

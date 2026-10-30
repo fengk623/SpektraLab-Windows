@@ -1,7 +1,7 @@
 From 12a036ad5189bb8ddde5918a620634d9aadf52e8 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Wed, 28 Oct 2026 23:29:46 -0500
-Subject: [PATCH 3/5] build(windows): build-windows.cmd with llvm-mingw, SQLite
+Subject: [PATCH 3/8] build(windows): build-windows.cmd with llvm-mingw, SQLite
  compiled in, the UTF-8 manifest; tests/c1_acceptance.py; 0.3.2
 
 - build-windows.cmd: libspklib.a, spklib-host.exe and spklib-tests.exe with

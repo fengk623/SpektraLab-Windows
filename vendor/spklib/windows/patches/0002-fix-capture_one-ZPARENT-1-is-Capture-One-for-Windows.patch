@@ -1,7 +1,7 @@
 From 8dfbf3a6bb03b8e77824d5308890978c9cff9091 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Wed, 28 Oct 2026 23:28:32 -0500
-Subject: [PATCH 2/5] fix(capture_one): ZPARENT -1 is Capture One for Windows'
+Subject: [PATCH 2/8] fix(capture_one): ZPARENT -1 is Capture One for Windows'
  "no parent" -- no root that is its own parent
 
 Capture One 16.6.4 for Windows writes ZPARENT = -1 on the root

@@ -9,7 +9,7 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 | 项 | 内容 | 状态 | 依据 |
 |---|---|---|---|
 | A1 | 本机 `build-windows.cmd test`，spklib-tests 全部通过 | 通过（补丁 0001–0005） | 开发机 2026-10-30 12:50：`spklib 0.3.2+d203db8a5ff8`，**561 passed, 0 failed**（与 CI 相同） |
-| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建 | 通过（`77aea7b`，补丁 0001–0005）；逐字节比较待 exe 入库 | run 41087191443（windows-latest）：`git am` 5 个补丁、llvm-mingw 与 SQLite 校验通过，spklib-tests **561 passed, 0 failed**；release `spklib-host.exe` 3,009,536 字节，SHA-256 `1c03400e81ae287077393ad5fbbc7aaf9a097d2664ff1a0935be16af7b204800`（`SPKLIB_COMMIT` d203db8a5ff8） |
+| A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建，release 可复现 | d203db8：构建与测试通过，可复现性找到原因并已修；补丁 0001–0008 待 CI | run 41087191443：spklib-tests 561 passed, 0 failed。run 41104617310：同一提交，runner 的默认检出（CRLF）与另一个文件夹里的 LF 检出各构建一次，**LF 那次与开发机逐字节相同**（`3956ba4a…`），CRLF 那次不同（`1c03400e…`）：差别全在 `.rsrc`，是按原样嵌入的 `host/spklib.manifest` 多了 23 个 CR。spklib `31ea13d` 用 `.gitattributes` 让所有检出都是 LF |
 | A3 | `c1_acceptance.py`，Capture One 关闭，对测试目录与会话 | 通过 | 开发机 2026-10-30 12:52，release `spklib-host.exe`：**36 passed, 0 failed**（见运行记录 1） |
 | A4 | spklib-tests 真实目录一轮（`SPKLIB_C1_CATALOG`） | 未通过 → 已修，待重跑 | 621 passed, 3 failed：3 处都是测试自己的独立读取有误（见运行记录 1），spklib 的结果与 Capture One 一致。修正在 spklib `ddb470c`，待重跑 |
 | A5 | Capture One 打开测试目录时再跑一次 | 待运行 | 文件清点的差异如实记录 |
@@ -65,7 +65,7 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 `50-run-all.cmd`，spklib `d203db8`（补丁 0001–0005），llvm-mingw 20261006（SHA-256 校验通过），SQLite 3.54.1（SHA3-256 校验通过）。
 
 - **构建与测试（A1）**：561 passed, 0 failed。
-- **release**：`spklib-host.exe` 3,009,536 字节，SHA-256 `3956ba4ab7502ad28d912d4bb7eee30f3b055e8c088a8e01a6c92f8aaae54c4d`。与 CI（`1c03400e…`）大小相同、**字节不同**：同样的源码与工具链没有给出同样的字节，正在查（CI 上加了第二次构建与逐字节定位，见 `.github/scripts/pe_diff.py`）。查清之前不入库 exe。二进制里没有本机路径（`strings` 只见到 llvm-mingw 预编译库自带的 `/home/runner/...`），PE 头与资源目录的时间戳都是 0。
+- **release**：`spklib-host.exe` 3,009,536 字节，SHA-256 `3956ba4ab7502ad28d912d4bb7eee30f3b055e8c088a8e01a6c92f8aaae54c4d`。与 CI 第一次的结果（`1c03400e…`）大小相同、字节不同。原因（CI run 41104617310 用 `.github/scripts/pe_diff.py` 定位）：GitHub 的 Windows runner 以 CRLF 检出文本文件，而 `host/spklib.manifest` 按原样嵌入 exe 的资源段，CRLF 版多 23 字节；同一提交以 LF 检出、放在另一个名字的文件夹里构建，得到的正是开发机的 `3956ba4a…`。所以构建与机器、路径无关，只与检出的换行有关；spklib `31ea13d` 的 `.gitattributes` 让所有检出都是 LF。二进制里没有本机路径（`strings` 只见到 llvm-mingw 预编译库自带的 `/home/runner/...`），PE 头与资源目录的时间戳都是 0。
 - **验收（A3）**，`c1_acceptance.py` 经 release `spklib-host.exe`：36 passed, 0 failed。
   - 目录：probe 计数（images 6、variants 6、locations 9、collections 19、trashed 0、inside_catalog 0、rated 5、color_tagged 4）与独立读取一致；link 后 6 张图的路径全部是 `C:/Users/<user>/Desktop/SpektraLab-Windows_Linux/_local_spklib_validation/photos/Day1/…` 与 `…/photos/Day2 子文件夹/…`，文件都存在；每张图的星级、色标与上表一致；3 个相册的图片与位置一致（Picks 在顶层，测试相册在 Trips 下，导入相册在“最近导入”下）；9 个文件夹的路径、名称（`C:/`、`Users`…`Day1`、`Day2 子文件夹`）、图片（Day1 3 张、Day2 子文件夹 3 张）与上下级一致；一个根，没有自己是自己父级的汇集。
   - 会话：probe 识别为 session，计数 images 3、variants 3、rated 2、color_tagged 1 与独立读取一致；link 回答 `unsupported`。
