@@ -15,7 +15,9 @@
 # recorded in vendor/spklib/windows/ACCEPTANCE.md (RFC-W002 §6.2).
 #
 # The test count and the release binary's size and SHA-256 are also written as
-# notices on the run, so they can be read without downloading the log.
+# notices on the run, so they can be read without downloading the log, and a
+# second build from an LF checkout in another folder must give the same bytes
+# (.github/scripts/pe_diff.py shows where it does not).
 
 name: spklib helper (Windows)
 
@@ -106,6 +108,31 @@ jobs:
         run: |
           exe=spklib/build/windows-x64/release/spklib-host.exe
           echo "::notice title=spklib-host.exe (release)::$(stat -c %s "$exe") bytes, SHA-256 $(sha256sum "$exe" | cut -d' ' -f1), SPKLIB_COMMIT $SPKLIB_COMMIT"
+
+      # Reproducibility on this runner: the same sources checked out again with LF line endings
+      # (actions/checkout gives CRLF on Windows), in a folder with another name, built again.
+      # The two must be the same bytes; pe_diff.py says where they are not, and whether either is
+      # the developer PC's build (KNOWN_BUILDS in BUILD-INFO.env).
+      - name: A second release build from an LF checkout in another folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C spklib -c core.autocrlf=false -c core.eol=lf worktree add -q ../spklib-lf HEAD
+          cp spklib/third_party/sqlite/sqlite3.c spklib/third_party/sqlite/sqlite3.h spklib/third_party/sqlite/sqlite3ext.h spklib-lf/third_party/sqlite/
+          crlf() { grep -c $'\r$' "$1" || true; }
+          echo "::notice title=line endings::src/library.cpp CRLF lines: checkout $(crlf spklib/src/library.cpp), LF worktree $(crlf spklib-lf/src/library.cpp)"
+
+      - name: Build it
+        shell: cmd
+        run: call spklib-lf\build-windows.cmd release
+
+      - name: Compare the two builds (and the developer PC's)
+        shell: bash
+        run: |
+          known=()
+          for k in ${KNOWN_BUILDS:-}; do known+=(--known "$k"); done
+          python .github/scripts/pe_diff.py spklib/build/windows-x64/release/spklib-host.exe \
+            spklib-lf/build/windows-x64/release/spklib-host.exe --name-a checkout --name-b lf-worktree "${known[@]}"
 
       # Once a binary is vendored, the release build must reproduce it byte for byte.
       - name: The release build is the vendored binary

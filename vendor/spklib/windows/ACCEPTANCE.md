@@ -8,10 +8,10 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 
 | 项 | 内容 | 状态 | 依据 |
 |---|---|---|---|
-| A1 | 本机 `build-windows.cmd test`，spklib-tests 全部通过 | 待运行 | 开发机上运行 `50-run-all.cmd`（见下） |
+| A1 | 本机 `build-windows.cmd test`，spklib-tests 全部通过 | 通过（补丁 0001–0005） | 开发机 2026-10-30 12:50：`spklib 0.3.2+d203db8a5ff8`，**561 passed, 0 failed**（与 CI 相同） |
 | A2 | CI：补丁应用到 `afafee6`，构建、测试、release 构建 | 通过（`77aea7b`，补丁 0001–0005）；逐字节比较待 exe 入库 | run 41087191443（windows-latest）：`git am` 5 个补丁、llvm-mingw 与 SQLite 校验通过，spklib-tests **561 passed, 0 failed**；release `spklib-host.exe` 3,009,536 字节，SHA-256 `1c03400e81ae287077393ad5fbbc7aaf9a097d2664ff1a0935be16af7b204800`（`SPKLIB_COMMIT` d203db8a5ff8） |
-| A3 | `c1_acceptance.py`，Capture One 关闭，对测试目录与会话 | 待运行 | 预检见下（Linux 上对数据库副本，不能代替） |
-| A4 | spklib-tests 真实目录一轮（`SPKLIB_C1_CATALOG`） | 待运行 | 同 A1，由 `40-acceptance.cmd` 运行 |
+| A3 | `c1_acceptance.py`，Capture One 关闭，对测试目录与会话 | 通过 | 开发机 2026-10-30 12:52，release `spklib-host.exe`：**36 passed, 0 failed**（见运行记录 1） |
+| A4 | spklib-tests 真实目录一轮（`SPKLIB_C1_CATALOG`） | 未通过 → 已修，待重跑 | 621 passed, 3 failed：3 处都是测试自己的独立读取有误（见运行记录 1），spklib 的结果与 Capture One 一致。修正在 spklib `ddb470c`，待重跑 |
 | A5 | Capture One 打开测试目录时再跑一次 | 待运行 | 文件清点的差异如实记录 |
 | A6 | `ZPARENT -1` 先红后绿 | 通过 | 旧代码失败 3 处，新代码通过（补丁 0002 的提交说明） |
 
@@ -60,4 +60,17 @@ PRD-W001 §6 的验收项，逐项写明依据。本文件随每次验收运行�
 
 ## 运行记录
 
-（待开发机运行后填写：用例数、release exe 的大小与 SHA-256、与 CI 是否逐字节一致、两次验收的检查结果与文件清点差异。）
+### 1. 开发机，Capture One 关闭（`c1-closed`），2026-10-30 12:50–12:52 CDT
+
+`50-run-all.cmd`，spklib `d203db8`（补丁 0001–0005），llvm-mingw 20261006（SHA-256 校验通过），SQLite 3.54.1（SHA3-256 校验通过）。
+
+- **构建与测试（A1）**：561 passed, 0 failed。
+- **release**：`spklib-host.exe` 3,009,536 字节，SHA-256 `3956ba4ab7502ad28d912d4bb7eee30f3b055e8c088a8e01a6c92f8aaae54c4d`。与 CI（`1c03400e…`）大小相同、**字节不同**：同样的源码与工具链没有给出同样的字节，正在查（CI 上加了第二次构建与逐字节定位，见 `.github/scripts/pe_diff.py`）。查清之前不入库 exe。二进制里没有本机路径（`strings` 只见到 llvm-mingw 预编译库自带的 `/home/runner/...`），PE 头与资源目录的时间戳都是 0。
+- **验收（A3）**，`c1_acceptance.py` 经 release `spklib-host.exe`：36 passed, 0 failed。
+  - 目录：probe 计数（images 6、variants 6、locations 9、collections 19、trashed 0、inside_catalog 0、rated 5、color_tagged 4）与独立读取一致；link 后 6 张图的路径全部是 `C:/Users/<user>/Desktop/SpektraLab-Windows_Linux/_local_spklib_validation/photos/Day1/…` 与 `…/photos/Day2 子文件夹/…`，文件都存在；每张图的星级、色标与上表一致；3 个相册的图片与位置一致（Picks 在顶层，测试相册在 Trips 下，导入相册在“最近导入”下）；9 个文件夹的路径、名称（`C:/`、`Users`…`Day1`、`Day2 子文件夹`）、图片（Day1 3 张、Day2 子文件夹 3 张）与上下级一致；一个根，没有自己是自己父级的汇集。
+  - 会话：probe 识别为 session，计数 images 3、variants 3、rated 2、color_tagged 1 与独立读取一致；link 回答 `unsupported`。
+  - **不修改原库**：目录文件夹 20 个文件、会话文件夹 16 个文件，运行前后的大小、修改时间与 SHA-256 完全相同。
+- **真实目录一轮（A4）**：621 passed, 3 failed。“the Capture One package is exactly as it was” 通过。3 处失败都在测试的独立读取：
+  1. 与 2. 文件夹的图片数：测试从 `ZIMAGEINCOLLECTION` 数文件夹成员。Mac 版目录里有这些行；**Capture One for Windows 不为文件夹写这些行**，于是测试读到 0，而 spklib 按位置数出 3（与 Capture One 显示的一致）。修正：文件夹的图片按位置数（spklib `ddb470c`）。
+  3. facets：测试写死了仓库负责人的相机型号 `NIKON Z 8`，在别的目录里查不到。修正：取该目录自己最常见的相机型号。
+- 另发现：`spklib-tests` 在临时目录里留下一个空的 `spklib-probe-*` 文件夹，来自“目录正在写入时 probe 被拒”的用例：快照失败时 probe 没有删掉自己的临时文件夹（上游原有）。修正并加了先红后绿的测试（spklib `c474dff`）。
