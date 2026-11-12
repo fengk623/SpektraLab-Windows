@@ -1070,3 +1070,17 @@ into `Session.savedGeometry` — one read per frame, shared with `frameStates`.
   log-exposure axis — every parity bar assumes them.
 - Do not remove the `XCTExpectFailure(strict: true)` marker on the histogram
   case except in the commit that fixes the histogram (trap 33).
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/` on the personal fork's `dev/agent-workspace` branch. Upstream issues are cited by number and never written to. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, unchanged, recorded on each issue file's `Status:` line. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
