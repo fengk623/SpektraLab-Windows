@@ -46,3 +46,26 @@ Keep beta.2 and older releases available for rollback. Update download links
 when publishing a new milestone, rather than silently replacing an old
 release's installer.
 
+## Verify a download
+
+Before a validation run records which build it tested, check the files it
+downloaded. Put the installer, portable ZIP, source ZIP, `BUILD.json` and
+`SHA256SUMS.txt` of one release in a folder and run, from a checkout:
+
+```powershell
+node .github/scripts/windows-verify-release.mjs --dir <folder>
+```
+
+It reads only, needs nothing but Node, and prints a JSON report: version,
+tag, source commit, the SHA-256 of each file, and every disagreement found.
+It checks that the checksum file lists exactly those files and they match;
+that the build manifest names this version, a `spektralab-windows-v` tag and
+the same packages; that the portable was staged from the same commit and
+holds exactly the files its own manifest lists; and that the source ZIP was
+archived from that commit. Keep the report with the test record.
+
+Straight after installing, before the first launch, add
+`--installed <install directory>` to compare what the installer laid down
+with the portable, file by file. Only the uninstaller is expected to be
+absent from the portable. This mode has fixture coverage only; it has not
+yet been run against a real installation.
