@@ -41,7 +41,7 @@ export function selectWindowsRelease(body: unknown, currentVersion: string): Upd
     // stable Mac tag carrying an older rolling Windows installer.
     if (installed.pre && !windowsTag) continue;
     if (r.prerelease !== Boolean(v.pre) || (v.pre && (!installed.pre || !windowsTag))) continue;
-    const asset = r.assets.find((a: { name?: unknown; browser_download_url?: unknown; size?: unknown; state?: unknown }) => {
+    const packages: { name: string }[] = r.assets.filter((a: { name?: unknown; browser_download_url?: unknown; size?: unknown; state?: unknown }) => {
       if (typeof a?.name !== 'string' || typeof a.size !== 'number' || a.size <= 0 || a.state !== 'uploaded') return false;
       const n = a.name.toLowerCase();
       return n.includes('spektralab') && /(?:^|[-_. ])(?:windows|win64|win32|win)(?:[-_. ]|$)/.test(n)
@@ -49,6 +49,10 @@ export function selectWindowsRelease(body: unknown, currentVersion: string): Upd
         && !/(?:darwin|macos|arm64|aarch64|source|symbols|debug)/.test(n)
         && /\.(?:zip|7z|exe|msi)$/.test(n) && officialUrl(a.browser_download_url, REPO + '/releases/download/');
     });
+    // A frozen Windows release carries an installer and a portable. Name the
+    // installer whatever order GitHub lists them in; a lone portable or
+    // rolling ZIP still counts.
+    const asset = packages.find((a) => /[-_. ]setup\.exe$/i.test(a.name)) ?? packages[0];
     if (asset) matches.push({ version: v, url: r.html_url, asset: asset.name });
   }
   matches.sort((a, b) => compare(b.version, a.version));

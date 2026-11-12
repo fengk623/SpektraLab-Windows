@@ -21,6 +21,16 @@ describe('Windows release identification', () => {
     expect(selectWindowsRelease([...candidates, windows('1.3.4')], '1.3.4-rc.1'))
       .toMatchObject({ kind: 'available', version: '1.3.4' });
   });
+  it('names the installer of a frozen release whatever order its assets are listed in', () => {
+    const v = '1.3.4-beta.3', tag = 'spektralab-windows-v' + v;
+    const installer = `SpektraLab-${v}-windows-x64-setup.exe`, portable = `SpektraLab-${v}-windows-x64-portable.zip`;
+    const others = [`SpektraLab-${v}-BUILD.json`, `SpektraLab-${v}-SHA256SUMS.txt`, `SpektraLab-${v}-source.zip`];
+    const frozen = (names: string[]) => ({ ...windows(v), assets: names.map((name) => ({ name,
+      browser_download_url: `${root}/download/${tag}/${name}`, size: 1234, state: 'uploaded' })) });
+    expect(selectWindowsRelease([frozen([...others, portable, installer])], '1.3.4-beta.2')).toMatchObject({ kind: 'available', asset: installer });
+    expect(selectWindowsRelease([frozen([installer, portable, ...others])], '1.3.4-beta.2')).toMatchObject({ kind: 'available', asset: installer });
+    expect(selectWindowsRelease([frozen([...others, portable])], '1.3.4-beta.2')).toMatchObject({ kind: 'available', asset: portable });
+  });
   it('keeps prereleases out of stable clients and rejects invalid beta syntax', () => {
     expect(selectWindowsRelease([windows('1.4.0-beta.1')], '1.3.4').kind).toBe('unavailable');
     expect(selectWindowsRelease([windows('1.4.0-beta.nope')], '1.3.4-beta.3').kind).toBe('unavailable');
