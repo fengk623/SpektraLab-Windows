@@ -1,0 +1,35 @@
+# Standalone manifest for PhotoCraft's `crates/raw`, staged outside its workspace.
+#
+# Upstream's manifest inherits its version, edition, lints and dependency
+# versions from the PhotoCraft workspace root, which is not staged. These are
+# the same values, written out (storytold/photocraft at the commit in ../PIN:
+# root Cargo.toml `[workspace.package]` / `[workspace.dependencies]`, and
+# crates/raw/Cargo.toml). The exact resolved versions are the ones in
+# engine/raw-photocraft/Cargo.lock, taken from PhotoCraft's own Cargo.lock.
+#
+# Left out on purpose: the `testgen` and `corpus` features and their `image`
+# dependency (test fixtures we do not build), and the dev-dependencies.
+[package]
+name = "photocraft-raw"
+description = "Clean-room, pure-Rust camera raw decoder and developer (DNG, CR2, TIFF/EP raws)"
+version = "0.23.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+zune-jpeg = "0.5"
+zune-core = "0.5"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"
+jxl-oxide = { version = "=0.12.6", default-features = false, features = ["rayon"] }
+
+[lints.rust]
+# `testgen` and `corpus` gate test-only code upstream; neither is declared here.
+unexpected_cfgs = { level = "allow", check-cfg = [] }
