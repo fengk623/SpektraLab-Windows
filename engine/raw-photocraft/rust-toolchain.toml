@@ -1,0 +1,9 @@
+# The toolchain this crate and the staged photocraft-raw are built and tested
+# with. photocraft-raw needs Rust 1.95 (edition 2024). rustup installs this
+# channel and the listed targets on first use; cargo must be started from this
+# directory (or below) for the pin to apply, which is what CMake does.
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"
+components = ["clippy"]
+targets = ["x86_64-pc-windows-gnu"]

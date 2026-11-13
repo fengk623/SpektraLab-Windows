@@ -1,0 +1,39 @@
+# spk-photocraft-raw: PhotoCraft's raw decoder and developer behind a C ABI,
+# as a static library linked into the engine's image I/O (engine/src/io).
+#
+# The dependency is the staged, pinned and overlaid copy that
+# engine/setup-photocraft-raw.{sh,ps1} writes to <repo>/build/deps/photocraft-raw
+# (pin and overlay: engine/third_party/photocraft-raw). CMake builds this crate
+# with `cargo build --locked`; see engine/cmake/PhotocraftRaw.cmake.
+[package]
+name = "spk-photocraft-raw"
+description = "C ABI over photocraft-raw: RAW to scene-linear ProPhoto RGB f32 for the SpektraLab host"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.95"
+publish = false
+
+[lib]
+name = "spk_photocraft_raw"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+photocraft-raw = { path = "../../build/deps/photocraft-raw" }
+# The bounded decode pool (SPEKTRALAB_RAW_THREADS). The same crate and version
+# photocraft-raw already uses; no second copy is built.
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+# One codegen unit and no LTO across the C boundary: reproducible objects, and
+# the archive holds plain object files a C++ linker can read.
+codegen-units = 1
+debug = false
+# Unwinding stays on: a panic is caught at the C boundary and reported as an
+# error instead of taking the host process down.
+panic = "unwind"
+
+[profile.dev]
+# The demosaic is unusable unoptimised; tests develop real frames.
+opt-level = 2
