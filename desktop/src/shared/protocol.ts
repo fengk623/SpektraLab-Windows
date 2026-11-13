@@ -174,6 +174,22 @@ export interface OpenResult {
   params: WireParams;
   pair_info?: PairInfo;
   timings_ms?: { decode?: number; open?: number; raw?: RawTimings };
+  /** RAW files only: which decoder made the frame, and which rule chose it (HOST-PROTOCOL "RAW decoders"). */
+  raw_decoder?: RawDecoderInfo;
+}
+
+export interface RawDecoderInfo {
+  backend: 'libraw' | 'photocraft';
+  /** `decode.raw_backend`, `SPEKTRALAB_RAW_BACKEND`, `accepted: <record>` or `not on the accepted PhotoCraft list`. */
+  reason: string;
+  decoder: string;
+  /** LibRaw's sensor-data decoder for the file, i.e. its compression mode, whichever decoder ran. */
+  libraw_decoder?: string;
+  /** PhotoCraft only. */
+  format?: string;
+  white_balance_source?: 'file_as_shot' | 'libraw_as_shot' | 'custom' | 'none';
+  calibration?: 'dng_embedded' | 'libraw_matrix' | 'photocraft_profile' | 'none';
+  warnings?: string[];
 }
 
 export interface RawTimings {
