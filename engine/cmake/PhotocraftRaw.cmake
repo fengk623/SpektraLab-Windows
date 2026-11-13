@@ -110,9 +110,12 @@ add_custom_target(spk_photocraft_raw_build DEPENDS "${photocraft_library}" "${ph
 add_library(spk_photocraft_raw STATIC IMPORTED GLOBAL)
 set_target_properties(spk_photocraft_raw PROPERTIES IMPORTED_LOCATION "${photocraft_library}")
 add_dependencies(spk_photocraft_raw spk_photocraft_raw_build)
-# What Rust's standard library needs from the system.
+# What Rust's standard library needs from the system: rustc's own list
+# (`native-static-libs` in the build output above) for 1.97.0, which is
+# kernel32 ntdll userenv ws2_32 dbghelp on both Windows targets and
+# gcc_s util rt pthread m dl c on Linux.
 if(WIN32)
-    target_link_libraries(spk_photocraft_raw INTERFACE ws2_32 userenv ntdll advapi32 bcrypt)
+    target_link_libraries(spk_photocraft_raw INTERFACE kernel32 ntdll userenv ws2_32 dbghelp)
 else()
     find_package(Threads REQUIRED)
     target_link_libraries(spk_photocraft_raw INTERFACE Threads::Threads ${CMAKE_DL_LIBS} m)

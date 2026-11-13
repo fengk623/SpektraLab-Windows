@@ -104,15 +104,27 @@ def main():
         out.append(f"{p['name']:28} {p['version']:12} {p['license']}")
     out += ["", "The Rust standard library (MIT OR Apache-2.0) is linked as well; its licence texts are",
             "the same MIT and Apache-2.0 texts reproduced below.", ""]
+    def notice_files(package):
+        directory = Path(package["manifest_path"]).parent
+        return sorted(f for f in directory.iterdir() if f.is_file() and NOTICE_FILE.match(f.name))
+
     missing = []
     for p in linked:
-        directory = Path(p["manifest_path"]).parent
-        notices = sorted(f for f in directory.iterdir() if f.is_file() and NOTICE_FILE.match(f.name))
+        notices = notice_files(p)
         out += ["=" * 78, f"{p['name']} {p['version']}  ({p['license']})",
                 p.get("repository") or p.get("homepage") or "", "=" * 78, ""]
         if not notices:
-            missing.append(f"{p['name']} {p['version']}")
-            out += ["(this crate's package ships no licence file; its licence expression is above)", ""]
+            # Some crates are published without their repository's licence
+            # file. Another linked crate from the same repository carries it.
+            sibling = next((q for q in linked if q is not p and q.get("repository")
+                            and q.get("repository") == p.get("repository") and notice_files(q)), None)
+            if sibling:
+                notices = notice_files(sibling)
+                out += [f"(this crate's package ships no licence file; the files below are from "
+                        f"{sibling['name']} {sibling['version']}, published from the same repository)", ""]
+            else:
+                missing.append(f"{p['name']} {p['version']}")
+                out += ["(this crate's package ships no licence file; its licence expression is above)", ""]
         for notice in notices:
             out += [f"--- {notice.name} ---", notice.read_text(encoding="utf-8", errors="replace").rstrip(), ""]
     Path(args.output).write_text("\n".join(out) + "\n", encoding="utf-8")

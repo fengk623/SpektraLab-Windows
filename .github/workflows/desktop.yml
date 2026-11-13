@@ -96,6 +96,7 @@ jobs:
           # written where crates.io is unreachable, so the first run makes it.
           [[ -f engine/raw-photocraft/Cargo.lock ]] || python3 engine/tools/pin_photocraft_lock.py
           python3 engine/tools/pin_photocraft_lock.py --check
+          echo "-----BEGIN CARGO LOCK-----"; cat engine/raw-photocraft/Cargo.lock; echo "-----END CARGO LOCK-----"
 
       # TEMPORARY, with the step above: the generated lock file, to commit.
       - uses: actions/upload-artifact@v4

@@ -40,7 +40,7 @@ FloatImage decode(const fs::path& path, const std::string& backend, Probe* probe
     FloatImage image;
     Probe probe;
     std::string error;
-    require(decode_linear_prophoto(path, options, image, probe, error), path.filename().string() + " (" + backend + "): " + error);
+    require(decode_linear_prophoto(path, options, image, probe, error), path_utf8(path.filename()) + " (" + backend + "): " + error);
     if (probe_out) *probe_out = probe;
     return image;
 }
@@ -302,15 +302,15 @@ int main(int argc, char** argv) {
                 options.raw_backend = backend;
                 std::string why;
                 require(!decode_linear_prophoto(bad, options, image, p, why) && !why.empty(),
-                        bad.filename().string() + " was accepted by " + backend);
+                        path_utf8(bad.filename()) + " was accepted by " + backend);
                 require(image.width == 7 && image.rgb.size() == 1, "a failed decode changed the caller's frame");
             }
             run_cli({"--input", path_utf8(bad), "--output", path_utf8(scratch / "never.tif"), "--backend", "photocraft"}, 4, {});
             require(!fs::exists(scratch / "never.tif"), "a failed decode left a TIFF behind");
         }
         for (const auto& entry : fs::directory_iterator(scratch))
-            require(entry.path().filename().string().find(".partial-") == std::string::npos,
-                    "an intermediate file was left behind: " + entry.path().filename().string());
+            require(path_utf8(entry.path().filename()).find(".partial-") == std::string::npos,
+                    "an intermediate file was left behind: " + path_utf8(entry.path().filename()));
         check_patches(decode(fixtures / "patches.dng", "photocraft"), "after the failures");
         require(decode(tiff, "auto").rgb == photocraft.rgb, "an ordinary TIFF no longer opens after a failed RAW");
 

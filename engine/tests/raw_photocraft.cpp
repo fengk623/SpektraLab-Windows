@@ -31,16 +31,24 @@ using spk::io::PhotocraftStatus;
 [[noreturn]] void fail(const std::string& what) { throw std::runtime_error(what); }
 void require(bool ok, const std::string& what) { if (!ok) fail(what); }
 
+// A path for a message. Not path::string(): on Windows that converts to the
+// ANSI code page and throws for a name the code page cannot hold, and the
+// scratch files here are named in Chinese on purpose.
+std::string shown(const fs::path& path) {
+    const std::u8string u = path.u8string();
+    return std::string(u.begin(), u.end());
+}
+
 std::vector<std::uint8_t> read(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
-    require(bool(in), "cannot open " + path.string());
+    require(bool(in), "cannot open " + shown(path));
     return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
 void write(const fs::path& path, const std::uint8_t* data, std::size_t size) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(data), std::streamsize(size));
-    require(bool(out), "cannot write " + path.string());
+    require(bool(out), "cannot write " + shown(path));
 }
 
 PhotocraftImage decode(const fs::path& path, const PhotocraftRequest& request = {}) {
@@ -48,7 +56,7 @@ PhotocraftImage decode(const fs::path& path, const PhotocraftRequest& request = 
     std::string error;
     const PhotocraftStatus status = spk::io::decode_raw_photocraft(path, request, image, error);
     require(status == PhotocraftStatus::Ok,
-            path.filename().string() + ": " + spk::io::photocraft_status_name(status) + ": " + error);
+            shown(path.filename()) + ": " + spk::io::photocraft_status_name(status) + ": " + error);
     return image;
 }
 
