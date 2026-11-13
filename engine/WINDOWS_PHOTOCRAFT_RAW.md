@@ -285,7 +285,9 @@ Apache-2.0 OR Zlib); `jxl-oxide` and its `jxl-*` crates (MIT OR Apache-2.0);
 MIT); `bytemuck`, `cfg-if`, `log`, `once_cell`, `tracing`, `tracing-core`,
 `pin-project-lite` (MIT and/or Apache-2.0, Zlib). The licence expressions in
 this paragraph are from memory of those crates; the build's generated notice
-is the authority, and the first CI build is where it is checked.
+is the authority. CI's builds pass the gate with 34 linked crates. One of
+them, `alloc-stdlib`, is published without a licence file; the notice takes
+the text from `alloc-no-stdlib`, published from the same repository.
 
 The decoder parses untrusted files. PhotoCraft pins `jxl-oxide` exactly for
 that reason and so does the staged manifest.
@@ -313,37 +315,57 @@ By hand, with camera files (the acceptance that is still open):
 & .\spektralab-host.exe raw-to-tiff --input D:\samples\A7R5.ARW `
     --output D:\out\A7R5-libraw.tif --report D:\out\A7R5-libraw.json --backend libraw
 # The whole app on PhotoCraft:
-$env:SPEKTRALAB_RAW_BACKEND = 'photocraft'; & 'C:\Program Files\SpektraLab\SpektraLab.exe'
+$env:SPEKTRALAB_RAW_BACKEND = 'photocraft'; & 'C:\Program Files\SpektraLab\spektralab.exe'
 ```
 
 ## What has and has not been verified
 
-Verified in a local build of this tree (Linux, GCC 13, Rust 1.97.0), with the
-caveat stated: that build used sequential stand-ins for `rayon` and for the
-three compressed-tile decoders (Deflate, lossy JPEG, JPEG XL), because the
-development workspace could not download crates. Pixel values do not depend
-on either for the uncompressed fixtures.
+**CI, on the personal fork** (`fengk623/SpektraLab-Windows`, branch
+`codex/windows-photocraft-raw`, manual `workflow_dispatch`, `publish_windows`
+off). Run
+[43372366886](https://github.com/fengk623/SpektraLab-Windows/actions/runs/43372366886)
+on `f284ff655bf3712c4b391a3b8455d2da944f31f8`, all seven jobs green, the
+publish job skipped:
 
-* The overlay's `develop.rs` tests: 18 passed, 4 of them new.
-* The wrapper's tests: 10 passed. The developed patches match the independent
-  DNG reference to 1.1e-7.
-* The C++ bridge test and the calibrated test, linked against that library
-  and a local LibRaw 0.22.2 build.
-* The host boundary test, with stand-ins for the codec, lens and engine
-  libraries the workspace could not build: float TIFF read-back bit for bit;
-  with the working-space fast path removed, that test fails.
-* `setup-photocraft-raw.sh`.
+| Job | Result |
+|---|---|
+| Engine + host (Linux, lavapipe) | CTest 51/51 (46 before this change), the five new tests among them, built `--locked` with the real crates; host smoke passed |
+| Engine + host (Windows x64, cross-built) | MinGW link of the Rust library; imports `ADVAPI32 KERNEL32 SHELL32 USER32 USERENV WS2_32 api-ms-win-core-synch-l1-2-0 bcryptprimitives msvcrt ntdll ole32`, all on the allowlist; host smoke under wine passed; `raw-to-tiff` under wine: PhotoCraft `e052eabf`, float TIFF read back exactly |
+| Engine (Windows x64, MSVC, CTest) | 40 tests registered (36 before), 15 run (11 before), all passed on real Windows: the bridge test including Chinese file names, the calibrated test, the fixtures check, and the crate's own `cargo test --locked`; `setup-photocraft-raw.ps1` staged the source |
+| PhotoCraft raw crate with the overlay | PhotoCraft's own `crates/raw` unit tests on the overlaid source, with PhotoCraft's lock file: 166 passed, 1 ignored (upstream's), 0 failed |
+| Frontend checks | vitest 463 passed, 1 skipped; cargo 24 passed; Playwright 61 passed (unchanged counts) |
+| Package (Linux) | built |
+| Package (Windows NSIS) | installer 39.4 MB (37.3 MB before); silent install; installed and portable hosts answer `hello`; portable 961 files (957 before: the four new licence files) |
 
-Not verified anywhere yet, and CI's job to show: the real crates (`--locked`),
-the MinGW cross build and its import table, the MSVC build,
-`setup-photocraft-raw.ps1`, the licence notice generation, the wine run.
+Also from CI: the lock file check (33 registry packages, each at PhotoCraft's
+locked version) on all three engine jobs, and the licence gate (34 linked
+Rust crates, all on the allowed list).
 
-Not verified and not verifiable without samples and a Windows machine with a
-GPU: every real camera file; compressed sensor data of any kind; X-Trans;
-colour against the LibRaw path on real scenes; orientation and image area on
-real files; lens correction and the neutral picker on a PhotoCraft frame;
-custom white balance on a non-DNG; timing and memory at 45 MP and 102 MP;
-in-app adjustment and full-size export.
+Two earlier runs on the branch are part of the record. Run 43369606838
+(`b67a291`): everything above passed except `spk_raw_photocraft` on MSVC,
+which failed in the test's own message formatting (`path::string()` throws on
+Windows for a Chinese file name); the test was fixed, not the code under test.
+Run 43370920743 (`2c85dba`): engine jobs green; superseded before packaging.
+
+**Local** (Linux, GCC 13, Rust 1.97.0), before any of that, with sequential
+stand-ins for `rayon` and the compressed-tile decoders because the
+development workspace could not download crates: the overlay's `develop.rs`
+tests, the wrapper's tests, the bridge and calibrated tests against a local
+LibRaw 0.22.2, and the host boundary test with stand-ins for the codec, lens
+and engine libraries. With the working-space fast path removed, the host test
+fails on the bit-exact read-back. The side-by-side figures quoted above
+(2.3e-4, 0.026) are from that local run of `spk_raw_photocraft_calibrated`;
+CI runs the same test and enforces its bounds but its log was not read for
+the figures.
+
+**Not verified anywhere**, because it needs camera files and a Windows machine
+with a GPU: every real camera file; compressed sensor data of any kind;
+X-Trans; colour against the LibRaw path on real scenes; orientation and image
+area on real files; lens correction and the neutral picker on a PhotoCraft
+frame; custom white balance on a non-DNG; timing and memory at 45 MP and
+102 MP; in-app adjustment and full-size export with PhotoCraft as the
+decoder. The hosted Windows runner has no Vulkan driver, so even the engine
+itself only runs under lavapipe in CI.
 
 ## Known limitations
 

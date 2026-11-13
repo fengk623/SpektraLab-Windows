@@ -539,6 +539,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "portable host failed hello" }
           Compress-Archive -LiteralPath $portable.FullName -DestinationPath ($portable.FullName + '.zip')
 
+      # What a tester writes into a validation record: the commit this was
+      # built from and the SHA-256 of the two files in the artifact. Printed
+      # and put in the run summary; the artifact itself is unchanged.
+      - name: Test package checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem desktop/release/windows -File | Where-Object { $_.Name -match '(-setup\.exe|-portable\.zip)$' } | Sort-Object Name)
+          if ($files.Count -ne 2) { throw "expected one installer and one portable zip, found $($files.Count)" }
+          $lines = @("commit  $env:GITHUB_SHA")
+          foreach ($file in $files) {
+              $lines += "sha256  $((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($file.Name)  ($($file.Length) bytes)"
+          }
+          $lines
+          @('### Windows test package', '', '```') + $lines + @('```') | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
       - uses: actions/upload-artifact@v4
         with:
           name: spektralab-windows-x64

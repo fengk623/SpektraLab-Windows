@@ -14,7 +14,7 @@ DEL-02。设计与契约见 `engine/WINDOWS_PHOTOCRAFT_RAW.md`。
 |---|---|
 | 分支 / 提交 SHA | |
 | CI 运行链接 | |
-| 测试包来源 | 个人仓库 Actions Artifacts `spektralab-windows-x64` |
+| 测试包来源 | 个人仓库 Actions Artifacts `spektralab-windows-x64`（只在 Artifacts，不发 Release） |
 | 安装包文件名 / SHA-256 | |
 | 便携包文件名 / SHA-256 | |
 | `spektralab-host.exe --version` | |
@@ -23,7 +23,9 @@ DEL-02。设计与契约见 `engine/WINDOWS_PHOTOCRAFT_RAW.md`。
 | GPU / 驱动版本 | |
 | Windows 版本（`winver`） | |
 
-校验值：`Get-FileHash -Algorithm SHA256 <文件>`。
+提交 SHA 和两个文件的 SHA-256 在该次 CI 运行的摘要页（“Windows test package”）和
+“Test package checksums” 步骤的日志里；下载后用 `Get-FileHash -Algorithm SHA256 <文件>`
+核对一致再测。
 
 ## 1. 样片登记（TEST-01）
 
@@ -44,11 +46,12 @@ PhotoCraft 命令，登记返回的退出码和错误原文即可。
 
 ## 2. RAW 转线性 TIFF（RAW-01、TIFF-01~04、DEL-02）
 
-`spektralab-host.exe` 在安装目录的 `resources\host\` 下，便携包同理。每个样片跑两次，输出
-用新文件名（已存在的输出不会被覆盖，除非加 `--overwrite`）：
+`spektralab-host.exe` 在安装目录根下（CI 的静默安装是 `C:\Program Files\SpektraLab\`），便携包
+在解压目录根下。每个样片跑两次，输出用新文件名（已存在的输出不会被覆盖，除非加
+`--overwrite`）：
 
 ```powershell
-$hostExe = 'C:\Program Files\SpektraLab\resources\host\spektralab-host.exe'   # 以实际安装位置为准
+$hostExe = 'C:\Program Files\SpektraLab\spektralab-host.exe'   # 便携包：<解压目录>\spektralab-host.exe
 $in = 'D:\samples\DSC00001.ARW'; $out = 'D:\raw-out'
 New-Item -ItemType Directory -Force $out | Out-Null
 & $hostExe raw-to-tiff --input $in --output "$out\DSC00001-photocraft.tif" `
@@ -95,7 +98,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 ```powershell
 $env:SPEKTRALAB_RAW_BACKEND = 'photocraft'
-& 'C:\Program Files\SpektraLab\SpektraLab.exe'
+& 'C:\Program Files\SpektraLab\spektralab.exe'
 ```
 
 不设该变量（或设为 `libraw`）重开应用，即为 LibRaw 对照。两种后端下，同一样片各做一遍：
