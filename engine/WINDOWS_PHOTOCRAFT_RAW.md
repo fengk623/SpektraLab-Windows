@@ -330,9 +330,10 @@ $env:SPEKTRALAB_RAW_BACKEND = 'photocraft'; & 'C:\Program Files\SpektraLab\spekt
 **CI, on the personal fork** (`fengk623/SpektraLab-Windows`, branch
 `codex/windows-photocraft-raw`, manual `workflow_dispatch`, `publish_windows`
 off). Run
-[43372366886](https://github.com/fengk623/SpektraLab-Windows/actions/runs/43372366886)
-on `f284ff655bf3712c4b391a3b8455d2da944f31f8`, all seven jobs green, the
-publish job skipped:
+[43375122469](https://github.com/fengk623/SpektraLab-Windows/actions/runs/43375122469)
+on `c2091d8d0b66f0e46819656e965ce9deabf960ea`, all seven jobs green, the
+publish job skipped. Commits after that one on this branch change only this
+document and the validation record (`git diff --stat c2091d8..HEAD`):
 
 | Job | Result |
 |---|---|
@@ -340,7 +341,7 @@ publish job skipped:
 | Engine + host (Windows x64, cross-built) | MinGW link of the Rust library; imports `ADVAPI32 KERNEL32 SHELL32 USER32 USERENV WS2_32 api-ms-win-core-synch-l1-2-0 bcryptprimitives msvcrt ntdll ole32`, all on the allowlist; host smoke under wine passed; `raw-to-tiff` under wine: PhotoCraft `e052eabf`, float TIFF read back exactly |
 | Engine (Windows x64, MSVC, CTest) | 40 tests registered (36 before), 15 run (11 before), all passed on real Windows: the bridge test including Chinese file names, the calibrated test, the fixtures check, and the crate's own `cargo test --locked`; `setup-photocraft-raw.ps1` staged the source |
 | PhotoCraft raw crate with the overlay | PhotoCraft's own `crates/raw` unit tests on the overlaid source, with PhotoCraft's lock file: 166 passed, 1 ignored (upstream's), 0 failed |
-| Frontend checks | vitest 463 passed, 1 skipped; cargo 24 passed; Playwright 61 passed (unchanged counts) |
+| Frontend checks | vitest 463 passed, 1 skipped; cargo 25 passed (24 before: the display cache test); Playwright 61 passed |
 | Package (Linux) | built |
 | Package (Windows NSIS) | installer 39.4 MB (37.3 MB before); silent install; installed and portable hosts answer `hello`; portable 961 files (957 before: the four new licence files) |
 
@@ -348,7 +349,21 @@ Also from CI: the lock file check (33 registry packages, each at PhotoCraft's
 locked version) on all three engine jobs, and the licence gate (34 linked
 Rust crates, all on the allowed list).
 
-Two earlier runs on the branch are part of the record. Run 43369606838
+The test package of that run is the Actions artifact `spektralab-windows-x64`
+(expires 2026-11-27); nothing was published as a release. Its two files, as
+printed by the run's "Test package checksums" step:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `SpektraLab_1.3.4-beta.3_x64-setup.exe` | 41382706 | `40ed8f2cc73533ae7d7425b6e79a8dd5dfaa7bd19aa74954bd90b235466f2aab` |
+| `SpektraLab-1.3.4-beta.3-windows-x64-portable.zip` | 64446529 | `c33e8fe6ac79ba7146c7280a6883219823dc99aef46cc5687dba48b1eff77636` |
+
+Both hosts in it answer `hello` as `0.1.0+c2091d8`.
+
+Earlier runs on the branch are part of the record. Run 43372366886
+(`f284ff6`): all seven jobs green with the same counts, except cargo 24
+(the display cache test did not exist yet). Run 43374620198 (`f9ebf81`): cancelled by the next
+dispatch on the branch (the workflow keeps one run per ref), no result. Run 43369606838
 (`b67a291`): everything above passed except `spk_raw_photocraft` on MSVC,
 which failed in the test's own message formatting (`path::string()` throws on
 Windows for a Chinese file name); the test was fixed, not the code under test.

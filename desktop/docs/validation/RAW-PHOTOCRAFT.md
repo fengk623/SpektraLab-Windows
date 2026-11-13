@@ -12,12 +12,12 @@ DEL-02。设计与契约见 `engine/WINDOWS_PHOTOCRAFT_RAW.md`。
 
 | 项 | 值 |
 |---|---|
-| 分支 / 提交 SHA | |
-| CI 运行链接 | |
+| 分支 / 提交 SHA | `codex/windows-photocraft-raw` / `c2091d8d0b66f0e46819656e965ce9deabf960ea` |
+| CI 运行链接 | https://github.com/fengk623/SpektraLab-Windows/actions/runs/43375122469 |
 | 测试包来源 | 个人仓库 Actions Artifacts `spektralab-windows-x64`（只在 Artifacts，不发 Release） |
-| 安装包文件名 / SHA-256 | |
-| 便携包文件名 / SHA-256 | |
-| `spektralab-host.exe --version` | |
+| 安装包文件名 / SHA-256 | `SpektraLab_1.3.4-beta.3_x64-setup.exe` / `40ed8f2cc73533ae7d7425b6e79a8dd5dfaa7bd19aa74954bd90b235466f2aab` |
+| 便携包文件名 / SHA-256 | `SpektraLab-1.3.4-beta.3-windows-x64-portable.zip` / `c33e8fe6ac79ba7146c7280a6883219823dc99aef46cc5687dba48b1eff77636` |
+| `spektralab-host.exe --version` | 待测（CI 里为 `0.1.0+c2091d8`） |
 | 报告里的 `photocraft_commit` | 应为 `e052eabf4be74612725400955d184f85d208c0f0` |
 | 机器 / CPU / 内存 | |
 | GPU / 驱动版本 | |
@@ -25,7 +25,8 @@ DEL-02。设计与契约见 `engine/WINDOWS_PHOTOCRAFT_RAW.md`。
 
 提交 SHA 和两个文件的 SHA-256 在该次 CI 运行的摘要页（“Windows test package”）和
 “Test package checksums” 步骤的日志里；下载后用 `Get-FileHash -Algorithm SHA256 <文件>`
-核对一致再测。
+核对一致再测。上表已按 2026-11-13 的运行 43375122469 填好（产物 2026-11-27 过期）；
+如果测的是之后某次运行的包，把这五行换成那次运行的值。
 
 ## 1. 样片登记（TEST-01）
 
