@@ -9,6 +9,11 @@ The default policy is `compatible16`. `headroom` is an explicit experimental
 alternative; neither mode silently falls back to the other. Bundled LibRaw
 does not support Nikon HE/HE* decoding.
 
+A second decoder, PhotoCraft's pure-Rust raw crate, sits behind the same host
+boundary and is described in [WINDOWS_PHOTOCRAFT_RAW.md](WINDOWS_PHOTOCRAFT_RAW.md).
+Nothing below changes with it: LibRaw remains the default for every file until
+a camera and compression mode are accepted for PhotoCraft on real samples.
+
 ## Build and run
 
 Follow [WINDOWS.md](WINDOWS.md) for the MinGW/Vulkan toolchain and dependency
