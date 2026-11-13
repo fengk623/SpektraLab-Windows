@@ -4,6 +4,9 @@
 #
 #   engine-linux          CMake + CTest on lavapipe (Mesa's CPU Vulkan), then
 #                         the host smoke test against the staged host.
+#   photocraft-overlay    PhotoCraft's raw crate at our pin with our overlay
+#                         applied, built with PhotoCraft's own lock file and
+#                         run through PhotoCraft's own tests.
 #   engine-windows-cross  spektralab-host.exe cross-built with MinGW-w64, and
 #                         the same smoke test under wine (winevulkan -> lavapipe).
 #   desktop-checks        typecheck, eslint, vitest, cargo test, Playwright
@@ -82,6 +85,15 @@ jobs:
           path: build/deps
           key: engine-deps-${{ runner.os }}-native-${{ hashFiles('engine/setup-*.sh', 'engine/setup-*.py', 'engine/cmake/*pins.json', 'engine/cmake/input-dependencies/**') }}
 
+      # PhotoCraft's raw crate, pinned and overlaid (engine/third_party/
+      # photocraft-raw), the Rust toolchain engine/raw-photocraft pins, and
+      # the lock file held to the versions PhotoCraft itself locks.
+      - name: PhotoCraft RAW source, Rust toolchain, lock file
+        run: |
+          engine/setup-photocraft-raw.sh
+          (cd engine/raw-photocraft && (rustup toolchain install || rustup show) && cargo --version && rustc --version)
+          python3 engine/tools/pin_photocraft_lock.py --check
+
       - name: Build, CTest, host smoke
         run: engine/build-linux.sh --test
 
@@ -121,6 +133,14 @@ jobs:
       - name: Dependency setup regression tests
         run: python3 -m unittest discover -s engine/tests -p 'test_*codec*.py' -v
 
+      # The same PhotoCraft source and lock; rustup adds x86_64-pc-windows-gnu
+      # from the crate's rust-toolchain.toml.
+      - name: PhotoCraft RAW source, Rust toolchain, lock file
+        run: |
+          engine/setup-photocraft-raw.sh
+          (cd engine/raw-photocraft && (rustup toolchain install || rustup show) && cargo --version && rustc --version)
+          python3 engine/tools/pin_photocraft_lock.py --check
+
       # Also fails if the exe imports anything but system DLLs.
       - name: Cross-build spektralab-host.exe
         run: engine/build-windows-cross.sh
@@ -134,6 +154,28 @@ jobs:
           xvfb-run -a python3 engine/tests/host_smoke.py --wrapper wine \
             --host build/host-win-x64/spektralab-host.exe \
             --resources build/host-win-x64/engine
+
+      # The Windows exe's PhotoCraft path, end to end, without a GPU: the
+      # synthetic DNG to a float TIFF, read back by the same exe. Exit 6 means
+      # the TIFF did not read back as written.
+      - name: raw-to-tiff under wine (PhotoCraft, synthetic DNG)
+        env:
+          WINEDEBUG: -all
+        run: |
+          mkdir -p build/raw-to-tiff
+          wine build/host-win-x64/spektralab-host.exe raw-to-tiff \
+            --input engine/tests/fixtures/photocraft/patches.dng \
+            --output build/raw-to-tiff/patches.tif --report build/raw-to-tiff/patches.json \
+            --backend photocraft > /dev/null
+          python3 - <<'PY'
+          import json
+          r = json.load(open('build/raw-to-tiff/patches.json'))
+          assert r['decode']['backend'] == 'photocraft', r['decode']
+          assert r['verify']['passed'] and r['verify']['max_abs_error'] == 0, r['verify']
+          assert r['tiff']['bits_per_sample'] == 32 and r['pixels']['samples_below_zero'] > 0, r
+          print('PhotoCraft', r['photocraft_commit'], 'in the Windows host; float TIFF exact;',
+                r['decode']['photocraft']['timings_ms'])
+          PY
 
       - name: Pack the staged host
         run: tar -C build -czf host-win-x64.tgz host-win-x64
@@ -215,6 +257,25 @@ jobs:
           }
           Get-ChildItem -LiteralPath $deps -Directory | Select-Object -ExpandProperty Name
 
+      # PhotoCraft's raw crate through the Windows setup script, the pinned
+      # Rust toolchain (MSVC host), and the lock file check.
+      - name: PhotoCraft RAW source, Rust toolchain, lock file
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:GITHUB_WORKSPACE 'engine/setup-photocraft-raw.ps1')
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'build/deps/photocraft-raw/src/develop.rs'))) {
+              throw 'photocraft-raw did not land in build/deps'
+          }
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'engine/raw-photocraft')
+          rustup toolchain install
+          if ($LASTEXITCODE) { rustup show; if ($LASTEXITCODE) { throw "rustup exited $LASTEXITCODE" } }
+          cargo --version; rustc --version
+          if ($LASTEXITCODE) { throw "rustc exited $LASTEXITCODE" }
+          Pop-Location
+          python (Join-Path $env:GITHUB_WORKSPACE 'engine/tools/pin_photocraft_lock.py') --check
+          if ($LASTEXITCODE) { throw "the lock file check exited $LASTEXITCODE" }
+
       - name: Configure, build, CTest
         shell: pwsh
         run: |
@@ -275,6 +336,31 @@ jobs:
 
           & $ctest --test-dir build/root-msvc --output-on-failure -E $noGpu
           if ($LASTEXITCODE) { throw "ctest exited $LASTEXITCODE" }
+
+  # The overlay is a change to someone else's decoder. This runs that
+  # decoder's own unit tests on it: PhotoCraft's tree at our pin, our two
+  # source files copied over theirs, their workspace and their Cargo.lock.
+  # The 16-bit path must still pass everything it passed upstream; the four
+  # tests the overlay adds run with it.
+  photocraft-overlay:
+    name: PhotoCraft raw crate with the overlay (its own tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PhotoCraft at the pin, overlay applied, its own lock file and tests
+        run: |
+          engine/setup-photocraft-raw.sh
+          commit="$(sed -n 's/^commit=//p' engine/third_party/photocraft-raw/PIN | tr -d '\r')"
+          work="$RUNNER_TEMP/photocraft"
+          mkdir -p "$work"
+          git -C "build/deps/photocraft-$commit" archive pinned | tar -x -C "$work"
+          cp engine/third_party/photocraft-raw/files/src/develop.rs engine/third_party/photocraft-raw/files/src/lib.rs "$work/crates/raw/src/"
+          toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' engine/raw-photocraft/rust-toolchain.toml)"
+          rustup toolchain install "$toolchain" --profile minimal
+          cd "$work"
+          cargo "+$toolchain" test --locked -p photocraft-raw --lib
 
   desktop-checks:
     name: Frontend checks
@@ -467,7 +553,7 @@ jobs:
   # never overwrite an asset under an old Mac release.
   release-windows:
     name: Publish the Windows pre-release
-    needs: [engine-linux, engine-windows-cross, engine-windows-msvc, desktop-checks, package-linux, package-windows]
+    needs: [engine-linux, engine-windows-cross, engine-windows-msvc, photocraft-overlay, desktop-checks, package-linux, package-windows]
     if: github.ref == 'refs/heads/Windows_Linux' && github.event_name == 'workflow_dispatch' && inputs.publish_windows
     runs-on: ubuntu-24.04
     timeout-minutes: 15

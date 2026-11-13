@@ -117,6 +117,12 @@ try {
             throw 'LibRaw is missing; run engine/setup-libraw.ps1 first.'
         }
         $LibRawSourceDirectory = (Resolve-Path -LiteralPath $LibRawSourceDirectory).Path
+        # The PhotoCraft RAW decoder builds from a fixed place under the
+        # repository (engine/raw-photocraft/Cargo.toml names it), not from
+        # this script's dependency directory.
+        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\build\deps\photocraft-raw\.spk-pin'))) {
+            throw 'PhotoCraft RAW source is missing; run engine/setup-photocraft-raw.ps1 first (it also needs cargo: https://rustup.rs).'
+        }
         $configureArguments += @('-DSPEKTRALAB_BUILD_NATIVE_RAW=ON', "-DSPEKTRALAB_LIBRAW_SOURCE=$($LibRawSourceDirectory.Replace('\', '/'))")
     } else { $configureArguments += '-DSPEKTRALAB_BUILD_NATIVE_RAW=OFF' }
     & $CMakeExecutable @configureArguments 2>&1 | Tee-Object -FilePath (Join-Path $BuildDirectory 'configure.log')

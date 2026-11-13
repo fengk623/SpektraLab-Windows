@@ -212,10 +212,19 @@ if(SPEKTRALAB_PORTABLE_BACKEND)
 
         if(SPEKTRALAB_BUILD_NATIVE_RAW)
             include(cmake/LibRaw.cmake)
-            add_library(spk_image_io STATIC src/io/raw_decoder.cpp src/io/raw_headroom.cpp src/io/image_writer.cpp)
+            include(cmake/PhotocraftRaw.cmake)
+            add_library(spk_image_io STATIC src/io/raw_decoder.cpp src/io/raw_headroom.cpp src/io/image_writer.cpp
+                src/io/raw_photocraft.cpp src/io/linear_prophoto_icc.cpp)
             target_compile_features(spk_image_io PUBLIC cxx_std_20)
             target_include_directories(spk_image_io PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
             target_link_libraries(spk_image_io PRIVATE spk_libraw)
+            if(SPEKTRALAB_PHOTOCRAFT_RAW)
+                # The Rust archive follows spk_image_io on every link line.
+                target_compile_definitions(spk_image_io PRIVATE SPK_PHOTOCRAFT_RAW=1)
+                target_link_libraries(spk_image_io PUBLIC spk_photocraft_raw)
+            else()
+                target_compile_definitions(spk_image_io PRIVATE SPK_PHOTOCRAFT_RAW=0)
+            endif()
             if(WIN32)
                 # Win32-only RAW-to-TIFF tool; engine/host is the portable host.
                 add_executable(spk_raw_render tools/raw_render.cpp)
@@ -280,6 +289,32 @@ if(SPEKTRALAB_PORTABLE_BACKEND)
                 add_executable(spk_raw_threads tests/raw_threads.cpp)
                 target_link_libraries(spk_raw_threads PRIVATE spk_image_io spk_libraw)
                 add_test(NAME spk_raw_threads COMMAND spk_raw_threads)
+                if(SPEKTRALAB_PHOTOCRAFT_RAW)
+                    # The bridge alone, across the C boundary, against the DNG reference.
+                    add_executable(spk_raw_photocraft tests/raw_photocraft.cpp)
+                    target_include_directories(spk_raw_photocraft PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+                    target_link_libraries(spk_raw_photocraft PRIVATE spk_image_io)
+                    add_test(NAME spk_raw_photocraft COMMAND spk_raw_photocraft
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/photocraft" "${SPEKTRALAB_PHOTOCRAFT_PIN}"
+                        "${CMAKE_CURRENT_BINARY_DIR}/raw-photocraft-tests")
+                    # PhotoCraft with LibRaw's metadata, and the two decoders side by side.
+                    add_executable(spk_raw_photocraft_calibrated tests/raw_photocraft_calibrated.cpp)
+                    target_include_directories(spk_raw_photocraft_calibrated PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+                    target_link_libraries(spk_raw_photocraft_calibrated PRIVATE spk_image_io spk_libraw)
+                    add_test(NAME spk_raw_photocraft_calibrated COMMAND spk_raw_photocraft_calibrated
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/photocraft")
+                    # The tracked fixtures are what their generator writes.
+                    add_test(NAME spk_photocraft_fixtures COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_photocraft_fixtures.py" --check)
+                    if(NOT CMAKE_CROSSCOMPILING)
+                        # The crate's own tests, with the locked crates and the pinned toolchain.
+                        add_test(NAME spk_photocraft_raw_cargo
+                            COMMAND "${CMAKE_COMMAND}" -E env "CARGO_TARGET_DIR=${SPEKTRALAB_PHOTOCRAFT_TARGET_DIR}"
+                                "${SPEKTRALAB_CARGO}" test --locked
+                            WORKING_DIRECTORY "${SPEKTRALAB_PHOTOCRAFT_CRATE}")
+                        set_tests_properties(spk_photocraft_raw_cargo PROPERTIES TIMEOUT 1800)
+                    endif()
+                endif()
             endif()
         endif()
 

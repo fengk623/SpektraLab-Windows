@@ -10,6 +10,8 @@
 #   spektrafilm (upstream engine), GPL-3.0  license/SPEKTRAFILM_LICENSE.txt
 #   profiles and LUTs, CC BY-SA 4.0         engine/resources/profiles, print LUTs
 #   LibRaw 0.22.2, LGPL-2.1 (of its LGPL/CDDL dual licence), statically linked
+#   PhotoCraft's raw decoder (MIT OR Apache-2.0) and the Rust crates under it,
+#   statically linked when the build has SPEKTRALAB_PHOTOCRAFT_RAW (default)
 #   stb (public domain / MIT), volk (MIT), Vulkan-Headers (Apache-2.0 OR MIT,
 #   compile time only)
 set -euo pipefail
@@ -44,6 +46,11 @@ cp "$here/third_party/stb/LICENSE" "$lic/stb-LICENSE.txt"
 cp "$here/third_party/volk/LICENSE.md" "$lic/volk-LICENSE.txt"
 cp "$deps/Vulkan-Headers/LICENSE.md" "$lic/Vulkan-Headers-LICENSE.txt"
 cp "$build/engine/host/third-party/codecs/"* "$lic/"
+photocraft_notices="$build/engine/third-party/photocraft-raw"
+if [[ -f "$photocraft_notices/Rust-crates-NOTICES.txt" ]]; then
+  # Present exactly when the decoder was built into the host.
+  cp "$photocraft_notices/"* "$lic/"
+fi
 cp "$build/engine/host/third-party/input-codecs/"* "$lic/"
 cp "$build/engine/host/third-party/lens/"* "$lic/"
 cat > "$lic/README.txt" <<'EOF'
@@ -55,6 +62,10 @@ this build was made from.
 Bundled third-party components:
   LibRaw 0.22.2        LGPL-2.1, statically linked; source: libraw.org, and
                        engine/setup-libraw.sh fetches the exact pinned tree.
+  PhotoCraft raw decoder  MIT OR Apache-2.0, statically linked when present
+                       (PhotoCraft-LICENSE-*.txt, PhotoCraft-NOTICE.txt); pin and
+                       source changes: engine/third_party/photocraft-raw. The
+                       Rust crates under it: Rust-crates-NOTICES.txt.
   stb_image, stb_image_write, stb_truetype   public domain / MIT (stb-LICENSE.txt)
   volk                 MIT (volk-LICENSE.txt)
   Vulkan-Headers       Apache-2.0 OR MIT, compile time only

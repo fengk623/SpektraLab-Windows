@@ -4,6 +4,9 @@
 #   engine/setup-deps.sh [deps-dir]        (default: <repo>/build/deps)
 #
 # - LibRaw 0.22.2 (engine/setup-libraw.sh: zip SHA-256, or git commit + tree id)
+# - PhotoCraft's raw crate (engine/setup-photocraft-raw.sh: git commit + tree
+#   id, then the tracked overlay). Always staged in <repo>/build/deps, whatever
+#   [deps-dir] is: engine/raw-photocraft/Cargo.toml names that path.
 # - Khronos Vulkan-Headers, tag vulkan-sdk-1.4.341.0 (commit + tree id). Headers
 #   only, compile time only; Apache-2.0 OR MIT. The loader itself is not linked:
 #   engine/third_party/volk opens libvulkan.so.1 / vulkan-1.dll at run time.
@@ -17,6 +20,7 @@ mkdir -p "$deps"
 deps="$(cd "$deps" && pwd)"
 
 "$here/setup-libraw.sh" "$deps" >/dev/null
+"$here/setup-photocraft-raw.sh" >/dev/null
 bash "$here/setup-codecs.sh" "$deps/export-codecs" >/dev/null
 
 pinned_clone() {   # url tag commit tree dest

@@ -6,6 +6,9 @@
 # MinGW-w64 (posix threads) through cmake/toolchain-mingw-w64.cmake; Vulkan
 # through volk, so no SDK import library -- the exe opens vulkan-1.dll at run
 # time; LibRaw 0.22.2 cross-built from the same pinned tree as Linux;
+# the PhotoCraft RAW decoder (Rust, engine/raw-photocraft) built for
+# x86_64-pc-windows-gnu by cargo and linked as a static library (rustup adds
+# the target from the crate's rust-toolchain.toml; no Rust linker is needed);
 # libstdc++, libgcc and winpthread linked statically, so the exe depends only
 # on system DLLs. Stages build/host-win-x64/ (HOST-PROTOCOL.md §4).
 #
@@ -90,7 +93,11 @@ if true; then
   # runtime is msvcrt (Ubuntu's MinGW) or the Universal CRT's api-ms-win-crt-*
   # forwarders (Homebrew's MinGW 14 defaults to UCRT; part of Windows 10+).
   # vulkan-1.dll is never imported: volk opens it at run time.
-  unexpected="$(echo "$imports" | grep -viE '^(kernel32|shell32|ws2_32|msvcrt|ucrtbase|advapi32|user32|ole32|bcrypt|api-ms-win-crt-[a-z0-9-]+)\.dll$' || true)"
+  # The PhotoCraft RAW decoder brings Rust's standard library, which reaches
+  # the system through ntdll, userenv, bcryptprimitives (the process RNG) and
+  # the api-ms-win-core-synch forwarder (WaitOnAddress); all ship with
+  # Windows 10 and later.
+  unexpected="$(echo "$imports" | grep -viE '^(kernel32|shell32|ws2_32|msvcrt|ucrtbase|advapi32|user32|ole32|bcrypt|bcryptprimitives|ntdll|userenv|api-ms-win-crt-[a-z0-9-]+|api-ms-win-core-synch-l1-2-0)\.dll$' || true)"
   if [[ -n "$unexpected" ]]; then
     echo "spektralab-host.exe imports DLLs outside the system allowlist: $(echo $unexpected)" >&2
     exit 1
