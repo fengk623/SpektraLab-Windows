@@ -310,7 +310,7 @@ jobs:
         run: npm run check
 
       - name: Windows release invariants
-        run: node --test ../.github/scripts/windows-release.test.mjs
+        run: node --test ../.github/scripts/windows-release.test.mjs ../.github/scripts/windows-verify-release.test.mjs
 
       # tauri::generate_context! embeds ../dist, so it must exist for cargo.
       - name: Web build
