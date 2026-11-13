@@ -273,8 +273,44 @@ pub fn engine_fingerprint(program:&Path,resources:&Path)->Result<String,String>{
     Ok(format!("{:x}",hash.finalize()))
 }
 
+/// The host obeys `SPEKTRALAB_RAW_BACKEND` (engine/host/raw_backend.hpp): the
+/// same build and the same settings then decode a RAW with another decoder,
+/// to different pixels. Nothing in a cache descriptor says so, and the host
+/// inherits this process's environment, so the override is part of the
+/// engine identity: a picture cached under one decoder is never shown under
+/// the other. Unset, empty or `auto` leaves the fingerprint as it was, so
+/// existing caches stay valid.
+pub fn with_decode_environment(engine: String, raw_backend: Option<&str>) -> String {
+    match raw_backend.map(|v| v.trim().to_ascii_lowercase()).filter(|v| !v.is_empty() && v != "auto") {
+        Some(backend) => format!("{engine};raw-backend={backend}"),
+        None => engine,
+    }
+}
+
 #[cfg(test)]mod tests{
     use super::*;
+
+    #[test]
+    fn the_raw_backend_override_is_part_of_the_engine_identity() {
+        let engine = || String::from("engine-a");
+        // No override: the fingerprint, and with it every existing key, is unchanged.
+        for unset in [None, Some(""), Some("  "), Some("auto"), Some("AUTO")] {
+            assert_eq!(with_decode_environment(engine(), unset), "engine-a");
+        }
+        let photocraft = with_decode_environment(engine(), Some("PhotoCraft"));
+        let libraw = with_decode_environment(engine(), Some("libraw"));
+        assert_eq!(photocraft, with_decode_environment(engine(), Some(" photocraft ")));
+        assert!(photocraft != libraw && photocraft != "engine-a" && libraw != "engine-a");
+        // And so the same frame and configuration get different cache keys.
+        let root = std::env::temp_dir().join(format!("spk-cache-backend-{}-{}", std::process::id(), SERIAL.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.raw");
+        fs::write(&source, b"source").unwrap();
+        let d = json!({"kind":"print","sources":[source],"configuration":{"film":"a","display":"srgb"}});
+        assert_ne!(key(&d, &photocraft).unwrap(), key(&d, &libraw).unwrap());
+        assert_ne!(key(&d, &photocraft).unwrap(), key(&d, "engine-a").unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]fn persistence_eviction_corruption_and_source_identity(){
         let root=std::env::temp_dir().join(format!("spk-cache-test-{}-{}",std::process::id(),SERIAL.fetch_add(1,Ordering::Relaxed)));
         fs::create_dir_all(&root).unwrap();

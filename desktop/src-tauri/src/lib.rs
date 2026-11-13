@@ -168,7 +168,10 @@ async fn frame_cache_key(app: AppHandle, state: State<'_, AppState>, descriptor:
     let fingerprint=Arc::clone(&state.cache_fingerprint);
     tauri::async_runtime::spawn_blocking(move || {
         let mut saved=fingerprint.lock().map_err(|e|e.to_string())?;
-        if saved.is_none(){*saved=Some(frame_cache::engine_fingerprint(&launch.program,&resources)?);}
+        if saved.is_none(){
+            let engine=frame_cache::engine_fingerprint(&launch.program,&resources)?;
+            *saved=Some(frame_cache::with_decode_environment(engine,std::env::var("SPEKTRALAB_RAW_BACKEND").ok().as_deref()));
+        }
         frame_cache::key(&descriptor,saved.as_ref().unwrap())
     }).await.map_err(|e|e.to_string())?
 }

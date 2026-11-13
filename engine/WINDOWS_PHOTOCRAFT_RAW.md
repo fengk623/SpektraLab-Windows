@@ -214,6 +214,13 @@ disagree.
 No fallback in either direction: a file sent to PhotoCraft that it does not
 develop fails with its reason.
 
+The desktop app keeps a display cache on disk, keyed by the frame, its
+settings and the engine build. The environment override changes the pixels
+without changing any of those, so the app adds it to the engine identity
+(`frame_cache::with_decode_environment`): a picture cached under one decoder
+is never shown under the other. With the override unset the keys are what
+they were, so existing caches stay valid.
+
 **The accepted list is empty.** Acceptance needs real camera files on a real
 GPU and has not happened. Until an entry is added, the app behaves as before
 unless one of the first two rules is used.

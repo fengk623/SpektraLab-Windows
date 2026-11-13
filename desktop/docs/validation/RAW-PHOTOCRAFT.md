@@ -101,7 +101,9 @@ $env:SPEKTRALAB_RAW_BACKEND = 'photocraft'
 & 'C:\Program Files\SpektraLab\spektralab.exe'
 ```
 
-不设该变量（或设为 `libraw`）重开应用，即为 LibRaw 对照。两种后端下，同一样片各做一遍：
+不设该变量（或设为 `libraw`）重开应用，即为 LibRaw 对照。切换后端必须重开应用：变量在
+应用启动时读取一次。磁盘上的显示缓存按后端分开存放，切换后不会显示另一后端留下的画面，
+无需手动清缓存。两种后端下，同一样片各做一遍：
 
 | 步骤 | PhotoCraft | LibRaw | 差异 / 备注 |
 |---|---|---|---|
