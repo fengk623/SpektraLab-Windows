@@ -92,7 +92,19 @@ jobs:
         run: |
           engine/setup-photocraft-raw.sh
           (cd engine/raw-photocraft && (rustup toolchain install || rustup show) && cargo --version && rustc --version)
+          # TEMPORARY, removed once the lock file is committed: the branch was
+          # written where crates.io is unreachable, so the first run makes it.
+          [[ -f engine/raw-photocraft/Cargo.lock ]] || python3 engine/tools/pin_photocraft_lock.py
           python3 engine/tools/pin_photocraft_lock.py --check
+
+      # TEMPORARY, with the step above: the generated lock file, to commit.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: photocraft-raw-cargo-lock
+          path: engine/raw-photocraft/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Build, CTest, host smoke
         run: engine/build-linux.sh --test
@@ -139,6 +151,9 @@ jobs:
         run: |
           engine/setup-photocraft-raw.sh
           (cd engine/raw-photocraft && (rustup toolchain install || rustup show) && cargo --version && rustc --version)
+          # TEMPORARY, removed once the lock file is committed: the branch was
+          # written where crates.io is unreachable, so the first run makes it.
+          [[ -f engine/raw-photocraft/Cargo.lock ]] || python3 engine/tools/pin_photocraft_lock.py
           python3 engine/tools/pin_photocraft_lock.py --check
 
       # Also fails if the exe imports anything but system DLLs.
@@ -273,6 +288,11 @@ jobs:
           cargo --version; rustc --version
           if ($LASTEXITCODE) { throw "rustc exited $LASTEXITCODE" }
           Pop-Location
+          # TEMPORARY, removed once the lock file is committed.
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'engine/raw-photocraft/Cargo.lock'))) {
+              python (Join-Path $env:GITHUB_WORKSPACE 'engine/tools/pin_photocraft_lock.py')
+              if ($LASTEXITCODE) { throw "generating the lock file exited $LASTEXITCODE" }
+          }
           python (Join-Path $env:GITHUB_WORKSPACE 'engine/tools/pin_photocraft_lock.py') --check
           if ($LASTEXITCODE) { throw "the lock file check exited $LASTEXITCODE" }
 
