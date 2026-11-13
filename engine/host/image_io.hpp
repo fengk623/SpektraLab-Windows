@@ -1,4 +1,4 @@
-// image_io.hpp -- what the host reads: RAW (LibRaw), TIFF, JPEG, PNG.
+// image_io.hpp -- what the host reads: RAW (LibRaw or PhotoCraft), TIFF, JPEG, PNG.
 //
 // The engine develops scene-linear radiance in linear ProPhoto RGB, top row
 // first (`io.input_color_space` = "ProPhoto RGB", `input_cctf_decoding`
@@ -6,7 +6,8 @@
 // Everything hard about external files is at that boundary (AGENTS.md traps
 // 11 and 12), so this file is where a display-encoded file is decoded:
 //
-//   * RAW -> LibRaw, linear ProPhoto (`spk::io::decode_raw_*`).
+//   * RAW -> linear ProPhoto, by LibRaw or by PhotoCraft
+//     (`spk::io::decode_raw_*`); raw_backend.hpp decides which.
 //   * TIFF/JPEG/PNG with an embedded matrix/TRC ICC profile -> that profile's
 //     curves off, its D50 colorants to XYZ, XYZ to linear ProPhoto. This is
 //     what ColorSync/Core Image do for the same file on macOS.
@@ -15,6 +16,9 @@
 //   * 16-bit or float TIFF without a profile -> linear ProPhoto, as the macOS
 //     decoder treats it (`ImageDecoder.swift`: an untagged deep TIFF is the
 //     app's own linear export).
+//   * A float TIFF tagged with the host's own linear ProPhoto profile
+//     (`spk::io::linear_prophoto_icc`, what `raw-to-tiff` writes) -> the
+//     samples as they are: they already are the working space.
 #pragma once
 
 #include <array>
@@ -57,6 +61,10 @@ struct Probe {
     FileKind kind = FileKind::Unknown;
     uint32_t width = 0, height = 0;   // as displayed (orientation applied)
     Metadata metadata;
+    // RAW only: LibRaw's sensor-data decoder for the file, i.e. its
+    // compression mode ("sony_arw2_load_raw", ...). Part of what
+    // raw_backend.hpp accepts a file by.
+    std::string raw_decoder;
 };
 bool probe_file(const std::filesystem::path& path, Probe& out, std::string& error);
 
@@ -66,6 +74,9 @@ struct FloatImage {
     std::vector<float> rgb;
     std::optional<spk::io::RawDecodeTimings> raw_timings;
     std::optional<spk::io::RawMetadata> raw_metadata;
+    // RAW only: why this decoder developed the file (raw_backend.hpp). The
+    // decoder itself is raw_metadata->backend.
+    std::string raw_backend_reason;
 };
 
 struct Rgba8 {
@@ -75,7 +86,11 @@ struct Rgba8 {
 
 // The frame the engine develops: linear ProPhoto, orientation applied.
 struct DecodeOptions {
-    std::string raw_mode = "compatible16";   // or "headroom"
+    // LibRaw's range policy: "compatible16" or "headroom". PhotoCraft has one
+    // range (float, not clamped) and ignores it.
+    std::string raw_mode = "compatible16";
+    // "auto" (raw_backend.hpp's rule), "libraw" or "photocraft".
+    std::string raw_backend = "auto";
     // R2: a custom white balance at decode (RAW, both decode modes).
     std::optional<double> temperature_k, tint;
     bool lens_correction = false;
@@ -120,6 +135,10 @@ bool parse_icc(const std::vector<uint8_t>& icc, RgbSpace& out, std::string& erro
 RgbSpace srgb_space();
 RgbSpace display_p3_space();
 RgbSpace linear_prophoto_space();
+// Whether an embedded profile is the host's own linear working-space profile
+// (io/linear_prophoto_icc.hpp), byte for byte. Samples under it are taken as
+// they are.
+bool is_working_linear_icc(const std::vector<uint8_t>& icc);
 // Encoded values (any range) -> linear ProPhoto, in place, 3 channels.
 void to_linear_prophoto(const RgbSpace& space, std::vector<float>& rgb);
 

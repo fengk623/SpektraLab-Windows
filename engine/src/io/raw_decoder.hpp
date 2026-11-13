@@ -3,8 +3,11 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include "raw_photocraft.hpp"
 
 namespace spk::io {
 
@@ -48,6 +51,18 @@ struct RawSourceSizes {
 };
 
 struct RawMetadata {
+    // Which decoder made the pixels: "libraw" (decode_raw_compatible /
+    // decode_raw_headroom) or "photocraft" (decode_raw_photocraft_calibrated).
+    // The LibRaw fields below describe the file as LibRaw reads it in both
+    // cases; with "photocraft" the ones about LibRaw's own processing
+    // (postprocess_*, process_warnings, rgb_cam as applied) describe nothing
+    // that ran, and `photocraft` says what did.
+    std::string backend = "libraw";
+    // LibRaw's name for the file's sensor-data decoder, i.e. its compression
+    // mode ("sony_arw2_load_raw", "lossless_jpeg_load_raw", ...), whichever
+    // backend decoded it. `decoder_name` is the decoder that actually ran.
+    std::string libraw_decoder_name;
+    std::optional<PhotocraftReport> photocraft;
     std::string libraw_version;
     std::uint32_t libraw_capabilities = 0;
     std::string make, model, decoder_name;
@@ -127,5 +142,29 @@ bool decode_raw_headroom(const std::filesystem::path& source,
 // restoration uses that actual selected WB, not the camera's as-shot value.
 bool decode_raw_headroom(const std::filesystem::path& source, const std::array<float, 4>* user_mul,
                          DecodedRaw& out, std::string& error);
+
+// PhotoCraft decodes and develops (raw_photocraft.hpp); LibRaw supplies what
+// PhotoCraft has no table for. The file is opened with LibRaw for metadata
+// only (no unpack): its XYZ -> camera matrix (cam_xyz, the D65 calibration
+// the host's Kelvin/tint also uses) is handed to PhotoCraft as the colour
+// calibration of every non-DNG file, and its as-shot multipliers are the
+// fallback when PhotoCraft reads none from the file. A DNG is developed with
+// its own matrices. `user_mul` is a caller-chosen white balance as for the
+// functions above (R, G, B used; the second green is ignored: PhotoCraft
+// balances three colours).
+//
+// The frame is linear ProPhoto f32, not clamped and not quantised, with
+// PhotoCraft's reading of the file's orientation applied. The metadata keeps
+// the contract host code relies on: `camera_to_output` is the matrix the
+// frame was made with (white-balanced camera -> ProPhoto),
+// `post_scale_pre_mul` the multipliers applied (smallest 1), and
+// `white_balance_exposure_restore` 1. Where PhotoCraft and LibRaw read the
+// file differently (orientation, image area) the report's warnings say so.
+//
+// No fallback to LibRaw's decoder: a file PhotoCraft does not develop fails
+// with its status, and the caller decides. On failure `out` is unchanged.
+PhotocraftStatus decode_raw_photocraft_calibrated(const std::filesystem::path& source,
+                                                  const std::array<float, 4>* user_mul,
+                                                  DecodedRaw& out, std::string& error);
 
 }  // namespace spk::io

@@ -14,8 +14,10 @@
 
 #include <libraw/libraw.h>
 
+#include "io/linear_prophoto_icc.hpp"
 #include "io/raw_camera.hpp"
 #include "io/raw_decoder.hpp"
+#include "raw_backend.hpp"
 #include "platform.hpp"
 #include "stb_image.h"
 #include "tiff_ifd.hpp"
@@ -223,6 +225,10 @@ RgbSpace linear_prophoto_space() {
     s.trc = {lin, lin, lin};
     s.description = "linear ProPhoto RGB (assumed)";
     return s;
+}
+
+bool is_working_linear_icc(const std::vector<uint8_t>& icc) {
+    return spk::io::is_linear_prophoto_icc(icc.data(), icc.size());
 }
 
 static std::array<double, 9> invert3(const std::array<double, 9>& m) {
@@ -789,6 +795,7 @@ bool probe_file(const fs::path& path, Probe& out, std::string& error) {
         auto raw = std::make_unique<CameraLibRaw>();
         if (!raw_open(*raw, path, error, &out.metadata)) return false;
         raw_metadata(*raw, out.metadata);
+        if (const char* decoder = raw->unpack_function_name()) out.raw_decoder = decoder;
         out.width = raw->imgdata.sizes.width;
         out.height = raw->imgdata.sizes.height;
         oriented_size(out.width, out.height, out.metadata.orientation);
@@ -818,6 +825,13 @@ bool decode_linear_prophoto(const fs::path& path, const DecodeOptions& options, 
     }
     if (probe.kind == FileKind::Heic || probe.kind == FileKind::Exr) return decode_extra(path, probe.kind, out, probe, error);
     if (probe.kind == FileKind::Raw) {
+        // One rule for every way a RAW file arrives (raw_backend.hpp).
+        RawBackendChoice choice;
+        const char* override_backend = std::getenv("SPEKTRALAB_RAW_BACKEND");
+        if (!choose_raw_backend(options.raw_backend, override_backend ? override_backend : "",
+                                {probe.metadata.make, probe.metadata.model, probe.raw_decoder},
+                                accepted_photocraft_raws(), choice, error))
+            return false;
         spk::io::DecodedRaw decoded;
         std::array<float, 4> mul{};
         if (custom_wb) {
@@ -828,15 +842,31 @@ bool decode_linear_prophoto(const fs::path& path, const DecodeOptions& options, 
                 return false;
             }
         }
-        const bool ok = options.raw_mode == "headroom"
-                            ? spk::io::decode_raw_headroom(path, custom_wb ? &mul : nullptr, decoded, error)
-                            : spk::io::decode_raw_compatible(path, custom_wb ? &mul : nullptr, decoded, error);
-        if (!ok) return false;
+        if (choice.backend == RawBackend::Photocraft) {
+            // No fallback to LibRaw: a file PhotoCraft does not develop fails
+            // with PhotoCraft's reason.
+            const auto status = spk::io::decode_raw_photocraft_calibrated(path, custom_wb ? &mul : nullptr, decoded, error);
+            if (status != spk::io::PhotocraftStatus::Ok) {
+                if (status == spk::io::PhotocraftStatus::Unsupported || status == spk::io::PhotocraftStatus::Unavailable)
+                    error = kUnsupportedPrefix + error;
+                return false;
+            }
+            // PhotoCraft's image area can differ from LibRaw's by a few
+            // pixels; what was developed is what is displayed.
+            probe.width = decoded.width;
+            probe.height = decoded.height;
+        } else {
+            const bool ok = options.raw_mode == "headroom"
+                                ? spk::io::decode_raw_headroom(path, custom_wb ? &mul : nullptr, decoded, error)
+                                : spk::io::decode_raw_compatible(path, custom_wb ? &mul : nullptr, decoded, error);
+            if (!ok) return false;
+        }
         out.width = decoded.width;
         out.height = decoded.height;
-        out.rgb = std::move(decoded.rgb);   // LibRaw already applied the flip
+        out.rgb = std::move(decoded.rgb);   // the decoder already applied the orientation
         out.raw_timings = decoded.timings;
         out.raw_metadata = std::move(decoded.metadata);
+        out.raw_backend_reason = choice.reason;
         if(options.lens_correction && !correct_lens(out,probe,error))return false;
         return true;
     }
@@ -846,6 +876,10 @@ bool decode_linear_prophoto(const fs::path& path, const DecodeOptions& options, 
     const RgbSpace space = raster_space(r, &note);
     if (!note.empty()) {
         if (!icc_to_linear_prophoto(r.icc, r.rgb, r.codes, error)) return false;
+    } else if (r.codes == 0 && is_working_linear_icc(r.icc)) {
+        // A float TIFF under the host's own linear ProPhoto profile already
+        // holds working-space samples. Converting them again, through a
+        // matrix that is identity only to rounding, would change them.
     } else encoded_to_linear_prophoto(space, r.rgb, r.codes);
     uint32_t w = r.width, h = r.height;
     apply_orientation(r.rgb, w, h, 3, r.meta.orientation);
@@ -854,6 +888,7 @@ bool decode_linear_prophoto(const fs::path& path, const DecodeOptions& options, 
     out.rgb = std::move(r.rgb);
     out.raw_timings.reset();
     out.raw_metadata.reset();
+    out.raw_backend_reason.clear();
     return true;
 }
 

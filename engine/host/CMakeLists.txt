@@ -11,6 +11,8 @@ add_executable(spektralab-host
     output.cpp
     output_codecs.cpp
     platform.cpp
+    raw_backend.cpp
+    raw_tiff_cli.cpp
     stb_impl.cpp
     tiff_ifd.cpp
     white_balance.cpp
@@ -49,7 +51,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME spk_host_lens COMMAND spk_host_lens "${CMAKE_CURRENT_BINARY_DIR}/lens-tests")
     add_executable(spk_host_inputs ../tests/host_inputs.cpp image_io.cpp input_formats.cpp lens_correction.cpp platform.cpp
-        stb_impl.cpp tiff_ifd.cpp white_balance.cpp)
+        raw_backend.cpp stb_impl.cpp tiff_ifd.cpp white_balance.cpp)
     target_compile_features(spk_host_inputs PRIVATE cxx_std_20)
     target_include_directories(spk_host_inputs PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../src"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb")
@@ -85,7 +87,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME spk_host_pair_source COMMAND spk_host_pair_source)
     add_executable(spk_host_codecs ../tests/host_codecs.cpp output.cpp output_codecs.cpp platform.cpp stb_impl.cpp
-        image_io.cpp input_formats.cpp lens_correction.cpp tiff_ifd.cpp white_balance.cpp)
+        image_io.cpp input_formats.cpp lens_correction.cpp raw_backend.cpp tiff_ifd.cpp white_balance.cpp)
     target_compile_features(spk_host_codecs PRIVATE cxx_std_20)
     target_include_directories(spk_host_codecs PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../include"
         "${CMAKE_CURRENT_SOURCE_DIR}/../src" "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb")
@@ -101,6 +103,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME spk_host_codecs COMMAND spk_host_codecs "${CMAKE_CURRENT_SOURCE_DIR}/../resources"
         "${CMAKE_CURRENT_BINARY_DIR}/codec-test-output")
+    if(SPEKTRALAB_PHOTOCRAFT_RAW)
+        # The RAW boundary with both decoders, the linear TIFF and raw-to-tiff.
+        add_executable(spk_host_raw_photocraft ../tests/host_raw_photocraft.cpp output.cpp output_codecs.cpp platform.cpp
+            stb_impl.cpp image_io.cpp input_formats.cpp lens_correction.cpp raw_backend.cpp raw_tiff_cli.cpp tiff_ifd.cpp
+            white_balance.cpp)
+        target_compile_features(spk_host_raw_photocraft PRIVATE cxx_std_20)
+        target_include_directories(spk_host_raw_photocraft PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../src" "${CMAKE_CURRENT_SOURCE_DIR}/../tests" "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb")
+        target_link_libraries(spk_host_raw_photocraft PRIVATE spk_image_io spk_libraw spektralab_engine spektralab_core
+            spk_codec_jpeg spk_codec_png spk_input_codecs spk_lens)
+        if(DEFINED SPEKTRALAB_HOST_VERSION)
+            target_compile_definitions(spk_host_raw_photocraft PRIVATE SPEKTRALAB_HOST_VERSION="${SPEKTRALAB_HOST_VERSION}")
+        endif()
+        if(WIN32)
+            target_link_libraries(spk_host_raw_photocraft PRIVATE shell32)
+        endif()
+        if(SPEKTRALAB_STATIC_RUNTIME AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            target_link_options(spk_host_raw_photocraft PRIVATE -static-libstdc++ -static-libgcc)
+            if(MINGW)
+                target_link_options(spk_host_raw_photocraft PRIVATE -static)
+            endif()
+        endif()
+        add_test(NAME spk_host_raw_photocraft COMMAND spk_host_raw_photocraft
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/photocraft" "${CMAKE_CURRENT_BINARY_DIR}/raw-photocraft-host-tests")
+    endif()
 endif()
 if(WIN32)
     target_link_libraries(spektralab-host PRIVATE ws2_32 shell32)

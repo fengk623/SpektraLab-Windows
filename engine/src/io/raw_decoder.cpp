@@ -339,6 +339,7 @@ bool decode_raw_compatible(const std::filesystem::path& source, const std::array
         }
         if (!capture_source_metadata(*raw, decoded.metadata, error)) return false;
         if (const char* name = raw->unpack_function_name()) decoded.metadata.decoder_name = name;
+        decoded.metadata.libraw_decoder_name = decoded.metadata.decoder_name;
 
         start = Clock::now();
         const int process_status = raw->dcraw_process();
@@ -470,6 +471,7 @@ bool decode_raw_headroom(const std::filesystem::path& source, const std::array<f
         if (!capture_source_metadata(*raw, decoded.metadata, error) ||
             !supported_headroom_source(*raw, error)) return false;
         if (const char* name = raw->unpack_function_name()) decoded.metadata.decoder_name = name;
+        decoded.metadata.libraw_decoder_name = decoded.metadata.decoder_name;
 
         start = Clock::now();
         const int process_status = raw->dcraw_process();
@@ -514,6 +516,140 @@ bool decode_raw_headroom(const std::filesystem::path& source, const std::array<f
     } catch (...) {
         error = "RAW headroom decode: unknown decoder exception";
         return false;
+    }
+}
+
+namespace {
+
+int flip_to_orientation(int flip) {
+    switch (flip) {
+        case 3: return 3;
+        case 5: return 8;
+        case 6: return 6;
+        default: return 1;
+    }
+}
+
+}  // namespace
+
+PhotocraftStatus decode_raw_photocraft_calibrated(const std::filesystem::path& source,
+                                                  const std::array<float, 4>* user_mul,
+                                                  DecodedRaw& out, std::string& error) {
+    error.clear();
+    const auto total_start = Clock::now();
+    try {
+        if (source.empty()) {
+            error = "RAW open: source path is empty";
+            return PhotocraftStatus::Io;
+        }
+        PhotocraftRequest request;
+        if (user_mul) {
+            for (unsigned c = 0; c < 3; ++c)
+                if (!std::isfinite((*user_mul)[c]) || (*user_mul)[c] <= 0.0f) {
+                    error = "RAW process: invalid user white-balance multiplier";
+                    return PhotocraftStatus::InvalidArgument;
+                }
+            request.wb_multipliers = std::array<double, 3>{(*user_mul)[0], (*user_mul)[1], (*user_mul)[2]};
+        }
+        request.threads = raw_worker_limit();
+
+        DecodedRaw decoded;
+        RawMetadata& metadata = decoded.metadata;
+        std::uint32_t libraw_width = 0, libraw_height = 0;
+        auto start = Clock::now();
+        {
+            // Metadata only: LibRaw never unpacks the sensor data on this path.
+            auto raw = std::make_unique<detail::CameraLibRaw>();
+            const int open_status = raw->open_file(source.c_str());
+            if (!libraw_ok(open_status, "RAW open", error)) return PhotocraftStatus::Io;
+            const auto& data = raw->imgdata;
+            const auto& color = data.color;
+            const auto& sizes = data.sizes;
+            metadata.libraw_version = LibRaw::version();
+            metadata.libraw_capabilities = LibRaw::capabilities();
+            metadata.make.assign(data.idata.make, std::find(std::begin(data.idata.make), std::end(data.idata.make), '\0'));
+            metadata.model.assign(data.idata.model, std::find(std::begin(data.idata.model), std::end(data.idata.model), '\0'));
+            metadata.sizes_before_postprocess = {
+                sizes.raw_width, sizes.raw_height, sizes.width, sizes.height, sizes.iwidth, sizes.iheight,
+                sizes.top_margin, sizes.left_margin, sizes.pixel_aspect};
+            metadata.raw_flip = sizes.flip;
+            metadata.colour_channels = data.idata.colors;
+            if (const char* name = raw->unpack_function_name()) metadata.libraw_decoder_name = name;
+            libraw_width = sizes.width;
+            libraw_height = sizes.height;
+            if (flip_to_orientation(sizes.flip) >= 5) std::swap(libraw_width, libraw_height);
+
+            bool wb_valid = true;
+            for (unsigned c = 0; c < 4; ++c) {
+                metadata.camera_whitebalance[c] = color.cam_mul[c];
+                if (c < 3 && (!std::isfinite(color.cam_mul[c]) || color.cam_mul[c] <= 0.00001f)) wb_valid = false;
+            }
+            if (wb_valid)
+                request.fallback_wb_multipliers = std::array<double, 3>{color.cam_mul[0], color.cam_mul[1], color.cam_mul[2]};
+            double weight = 0;
+            if (data.idata.colors == 3) {
+                std::array<double, 9> matrix{};
+                for (int row = 0; row < 3; ++row)
+                    for (int col = 0; col < 3; ++col) {
+                        matrix[row * 3 + col] = color.cam_xyz[row][col];
+                        metadata.camera_from_xyz[row * 3 + col] = color.cam_xyz[row][col];
+                        weight += std::fabs(color.cam_xyz[row][col]);
+                    }
+                // LibRaw's table is the D65 calibration (Adobe ColorMatrix2).
+                if (weight > 0 && std::isfinite(weight)) request.color_matrix = matrix;
+            }
+            for (int row = 0; row < 3; ++row)
+                for (int col = 0; col < 4; ++col) metadata.rgb_cam[row * 4 + col] = color.rgb_cam[row][col];
+        }
+        decoded.timings.open_ms = elapsed_ms(start);
+
+        PhotocraftImage image;
+        const PhotocraftStatus status = decode_raw_photocraft(source, request, image, error);
+        if (status != PhotocraftStatus::Ok) {
+            error = std::string("RAW decode (PhotoCraft, ") + photocraft_status_name(status) + "): " + error;
+            return status;
+        }
+        PhotocraftReport& report = image.report;
+        if (report.orientation != flip_to_orientation(metadata.raw_flip))
+            report.warnings.push_back("orientation: PhotoCraft reads " + std::to_string(report.orientation) +
+                                      " and applied it; LibRaw reads " +
+                                      std::to_string(flip_to_orientation(metadata.raw_flip)));
+        if (image.width != libraw_width || image.height != libraw_height)
+            report.warnings.push_back("image area: PhotoCraft develops " + std::to_string(image.width) + " x " +
+                                      std::to_string(image.height) + ", LibRaw " + std::to_string(libraw_width) +
+                                      " x " + std::to_string(libraw_height));
+
+        metadata.backend = "photocraft";
+        metadata.decoder_name = "photocraft-raw " + report.format;
+        for (unsigned c = 0; c < 4; ++c) metadata.post_scale_pre_mul[c] = float(report.wb_multipliers[c == 3 ? 1 : c]);
+        metadata.black = std::uint32_t(std::max(0.0, report.black_level_min));
+        for (unsigned c = 0; c < 4; ++c) metadata.black_level_per_channel[c] = metadata.black;
+        metadata.white_level = std::uint32_t(std::max(0.0, report.white_level[1]));
+        metadata.headroom_enabled = false;
+        metadata.white_balance_exposure_restore = 1.0;
+        for (int row = 0; row < 3; ++row)
+            for (int col = 0; col < 3; ++col)
+                metadata.camera_to_output[row * 4 + col] = float(report.camera_to_prophoto[row * 3 + col]);
+
+        decoded.width = image.width;
+        decoded.height = image.height;
+        decoded.rgb = std::move(image.rgb);
+        decoded.timings.openmp_enabled = false;
+        decoded.timings.workers = request.threads;
+        decoded.timings.open_ms += report.read_ms;
+        decoded.timings.unpack_ms = report.decode_ms;
+        decoded.timings.process_ms = report.develop_ms;
+        decoded.timings.convert_ms = report.copy_ms;
+        metadata.photocraft = std::move(report);
+        decoded.timings.total_ms = elapsed_ms(total_start);
+        out = std::move(decoded);
+        return PhotocraftStatus::Ok;
+    } catch (const std::exception& exception) {
+        error = std::string("RAW decode (PhotoCraft): ") + exception.what();
+        return PhotocraftStatus::Internal;
+    } catch (...) {
+        error = "RAW decode (PhotoCraft): unknown exception";
+        return PhotocraftStatus::Internal;
     }
 }
 

@@ -8,10 +8,15 @@
 #include <io.h>
 #include <process.h>
 #define WIN32_LEAN_AND_MEAN
+// PSAPI_VERSION 2 binds GetProcessMemoryInfo to kernel32's K32 export, so the
+// host imports no psapi.dll (build-windows-cross.sh checks the import table).
+#define PSAPI_VERSION 2
 #include <windows.h>
+#include <psapi.h>
 #include <shellapi.h>
 #else
 #include <cerrno>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 
@@ -143,6 +148,23 @@ bool write_file_atomic(const std::filesystem::path& path,
 unsigned hardware_threads() {
     const unsigned n = std::thread::hardware_concurrency();
     return n ? n : 4;
+}
+
+uint64_t peak_memory_bytes() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof counters;
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters)) return 0;
+    return uint64_t(counters.PeakWorkingSetSize);
+#else
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+#ifdef __APPLE__
+    return uint64_t(usage.ru_maxrss);            // bytes
+#else
+    return uint64_t(usage.ru_maxrss) * 1024;     // kibibytes
+#endif
+#endif
 }
 
 std::vector<std::string> utf8_args(int argc, char** argv) {

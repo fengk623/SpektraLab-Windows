@@ -38,6 +38,11 @@ bool write_file_atomic(const std::filesystem::path& path,
 
 unsigned hardware_threads();
 
+// The largest amount of physical memory this process has held at once, in
+// bytes (peak working set on Windows, peak resident set elsewhere). 0 when
+// the platform does not say.
+uint64_t peak_memory_bytes();
+
 // The command line as UTF-8 (on Windows from GetCommandLineW, since argv is
 // in the ANSI code page there).
 std::vector<std::string> utf8_args(int argc, char** argv);

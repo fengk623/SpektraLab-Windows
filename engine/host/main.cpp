@@ -45,6 +45,7 @@
 #include "json.hpp"
 #include "output.hpp"
 #include "platform.hpp"
+#include "raw_tiff_cli.hpp"
 #include "spektrafilm/spk_engine.h"
 #include "pipeline/view.hpp"
 
@@ -574,8 +575,11 @@ DecodeOptions decode_options(const Json& decode) {
     options.raw_mode = optional_string(decode, "raw_mode", "compatible16");
     if (options.raw_mode != "compatible16" && options.raw_mode != "headroom")
         throw HostError{"bad_request", "decode.raw_mode must be compatible16 or headroom"};
+    options.raw_backend = optional_string(decode, "raw_backend", "auto");
+    if (options.raw_backend != "auto" && options.raw_backend != "libraw" && options.raw_backend != "photocraft")
+        throw HostError{"bad_request", "decode.raw_backend must be auto, libraw or photocraft"};
     for (const auto& kv : decode.fields()) {
-        if (kv.first == "raw_mode") continue;
+        if (kv.first == "raw_mode" || kv.first == "raw_backend") continue;
         if (kv.first == "white_balance") {
             const Json& wb = kv.second;
             const std::string mode = optional_string(wb, "mode", "as_shot");
@@ -658,6 +662,25 @@ Json open_reply(const Session& s, const Decoded& d, const Json& opened, double o
         timings.set("raw", std::move(raw));
     }
     r.set("timings_ms", std::move(timings));
+    if (d.frame.raw_metadata) {
+        // Which RAW decoder made this frame, and why (raw_backend.hpp).
+        const auto& m = *d.frame.raw_metadata;
+        Json raw = Json::object();
+        raw.set("backend", str(m.backend));
+        raw.set("reason", str(d.frame.raw_backend_reason));
+        raw.set("decoder", str(m.decoder_name));
+        if (!m.libraw_decoder_name.empty()) raw.set("libraw_decoder", str(m.libraw_decoder_name));
+        if (m.photocraft) {
+            const auto& p = *m.photocraft;
+            raw.set("format", str(p.format));
+            raw.set("white_balance_source", str(spk::io::photocraft_wb_source_name(p.wb_source)));
+            raw.set("calibration", str(spk::io::photocraft_calibration_name(p.calibration)));
+            Json warnings = Json::array();
+            for (const std::string& w : p.warnings) warnings.push(str(w));
+            raw.set("warnings", std::move(warnings));
+        }
+        r.set("raw_decoder", std::move(raw));
+    }
     return r;
 }
 
@@ -1272,7 +1295,8 @@ Json m_export_frame(const Request& q, std::vector<uint8_t>* proof_payload = null
             throw HostError{"bad_request", "no_film is unavailable for a half-frame pair"};
         if (q.params.has("decode")) {
             const auto requested = decode_options(q.params.at("decode"));
-            if (requested.raw_mode != s->decode.raw_mode || requested.temperature_k != s->decode.temperature_k ||
+            if (requested.raw_mode != s->decode.raw_mode || requested.raw_backend != s->decode.raw_backend ||
+                requested.temperature_k != s->decode.temperature_k ||
                 requested.tint != s->decode.tint || requested.lens_correction != s->decode.lens_correction) {
                 // A pending UI redecode must not silently export older white balance.
                 // Keep the editor's session intact and render the frozen decode privately.
@@ -1764,7 +1788,9 @@ void usage() {
     std::fprintf(stderr,
                  "usage: spektralab-host --resources <engine-resources-dir> [--device <index>] "
                  "[--log-level error|info|debug]\n"
-                 "Speaks desktop/HOST-PROTOCOL.md on stdin/stdout.\n");
+                 "Speaks desktop/HOST-PROTOCOL.md on stdin/stdout.\n"
+                 "       spektralab-host raw-to-tiff --input <raw> --output <tif> [...]\n"
+                 "One RAW file to a linear ProPhoto TIFF; run it without arguments for its options.\n");
 }
 
 }  // namespace
@@ -1772,6 +1798,8 @@ void usage() {
 int main(int argc, char** argv) {
     set_binary_stdio();
     const std::vector<std::string> args = utf8_args(argc, argv);
+    // A one-shot command, not the protocol: RAW -> linear TIFF (raw_tiff_cli.hpp).
+    if (args.size() > 1 && args[1] == "raw-to-tiff") return raw_to_tiff_main(args);
     std::string resources;
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string& a = args[i];

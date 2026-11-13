@@ -123,7 +123,7 @@ What a file is decoded *to* (the engine develops linear ProPhoto RGB, top row fi
 ### Sessions (one per open frame)
 | method | params | result |
 |---|---|---|
-| `open` | `{path, decode?: {raw_mode?: "compatible16"\|"headroom", white_balance?: {mode: "as_shot"\|"custom", temperature_k?, tint?}, lens_correction?: boolean}, params?: <full or partial params JSON>}` | `{session: "<sid>", width, height, kind, metadata, params, detected_input, output_color_space, timings_ms: {decode, open}}` — any other `decode` key is `unsupported` |
+| `open` | `{path, decode?: {raw_mode?: "compatible16"\|"headroom", raw_backend?: "auto"\|"libraw"\|"photocraft", white_balance?: {mode: "as_shot"\|"custom", temperature_k?, tint?}, lens_correction?: boolean}, params?: <full or partial params JSON>}` | `{session: "<sid>", width, height, kind, metadata, params, detected_input, output_color_space, timings_ms: {decode, open}, raw_decoder?}` — any other `decode` key is `unsupported`; `raw_backend` and `raw_decoder` are described under "RAW decoders" below |
 | `redecode` | `{session, decode}` | as `open` (same `session` id, params kept): decode the session's file again with other decode settings. The engine session is replaced; on failure the old one is untouched (R2) |
 | `close` | `{session}` | `{}` |
 | `render_source` | `{session,display:"srgb"\|"display-p3",long_edge?,generation?}` | `{image,generation,source:"decoded"}` + RGBA8 of the current decoded source; film/grade edits do not affect it |
@@ -537,6 +537,73 @@ A pending `scene_placement` on a pair includes its selected source-hole
 the fit's active/knee/room fields to the B curve while retaining shared norm,
 rolloff and max-lift. An invalid fit fails instead of silently exporting an
 unfitted or wrong-hole edit.
+
+## RAW decoders and `raw-to-tiff` (additive, protocol 1)
+
+Two decoders develop RAW files: LibRaw (`raw_mode` `compatible16` or
+`headroom`) and PhotoCraft (`engine/WINDOWS_PHOTOCRAFT_RAW.md`). Every method
+that decodes a file -- `open`, the pair source, and a private re-decode for an
+export -- goes through one function, so the same rule gives the same decoder
+for the same file however it arrives.
+
+`decode.raw_backend` is optional and defaults to `"auto"`:
+
+| value | decoder |
+|---|---|
+| `"libraw"` | LibRaw. |
+| `"photocraft"` | PhotoCraft. A file it does not develop fails (`unsupported` for a format, compression or missing calibration; `decode_failed` otherwise). It is never re-decoded by LibRaw. |
+| `"auto"` | `SPEKTRALAB_RAW_BACKEND` in the host's environment if it is `libraw` or `photocraft` (a tester's override; any other non-empty value but `auto` is a decode error); else PhotoCraft for a camera and compression mode on the host's accepted list, LibRaw for everything else. The accepted list is empty in this build. |
+
+`raw_mode` selects LibRaw's range policy only; PhotoCraft has one range
+(32-bit float, not clamped to 0..1) and ignores it. Custom white balance uses
+the same Kelvin/tint mapping with either decoder. Lens correction runs on a
+PhotoCraft frame through the same code, and has not been validated on real
+files. An export whose `decode.raw_backend`
+differs from the open session's is rendered from a private re-decode, as for
+`raw_mode`.
+
+For a RAW file the `open` reply carries
+`raw_decoder: {backend: "libraw"|"photocraft", reason, decoder, libraw_decoder?, format?, white_balance_source?, calibration?, warnings?}`.
+`reason` says which rule chose the decoder (`"decode.raw_backend"`,
+`"SPEKTRALAB_RAW_BACKEND"`, `"accepted: <record>"`,
+`"not on the accepted PhotoCraft list"`). `libraw_decoder` is LibRaw's name for
+the file's sensor-data decoder, i.e. its compression mode, whichever decoder
+ran. The last four are present for PhotoCraft: the container family, where the
+white balance came from (`file_as_shot`, `libraw_as_shot`, `custom`, `none`),
+where the colour calibration came from (`dng_embedded`, `libraw_matrix`,
+`photocraft_profile`, `none`), and anything PhotoCraft or the host noted
+(a different orientation or image area than LibRaw reads). Clients that do not
+know the field ignore it.
+
+The host executable also runs one command outside the protocol:
+
+```
+spektralab-host raw-to-tiff --input <raw> --output <tif> [--report <json>]
+        [--backend auto|libraw|photocraft] [--raw-mode compatible16|headroom]
+        [--temperature <kelvin> [--tint <tint>]] [--format f32|u16]
+        [--no-verify] [--overwrite]
+```
+
+It decodes the file exactly as `open` would, writes the frame as an
+uncompressed linear ProPhoto RGB TIFF (32-bit float by default: no clamp, no
+scaling; `u16` clamps to 0..1 and rounds to 65535 steps), Orientation 1, with
+the host's linear ProPhoto ICC profile and the source's shooting data, then
+reads the TIFF back through the reader `open` uses for a TIFF and compares.
+The JSON report (also printed on stdout) records the decoder and why, the
+camera, LibRaw's decoder name, white balance and calibration sources, levels,
+warnings, separate read / decode / develop / write timings, pixel statistics
+(including how many samples lie below 0 and above 1), the profile's ICC
+Profile ID, the read-back error, and the process's peak memory after decode,
+after the write and after the read-back. It needs no engine resources and no
+GPU. Exit status: 0 success, 2 usage, 3 not developed by the chosen decoder,
+4 decode failed, 5 an output exists or could not be written, 6 the TIFF did
+not read back as written. Outputs are staged beside their destination and
+renamed into place; a failure leaves nothing behind.
+
+A float TIFF carrying exactly that profile is opened without a colour
+conversion: its samples already are the working space, so `open` on the TIFF
+hands the engine the same numbers `open` on the RAW would.
+
 
 ## User CLI and MCP
 

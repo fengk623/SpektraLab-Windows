@@ -558,7 +558,13 @@ static bool tiff_prefix(uint32_t w, uint32_t h, uint32_t bits, const std::vector
                         std::vector<uint8_t>& out, size_t& image_bytes, std::string& error,
                         const Exif* exif_fields_in, bool cineon = false, bool reduced = false,
                         size_t origin = 0) {
-    if (bits != 8 && bits != 16) { error = "TIFF bits must be 8 or 16"; return false; }
+    // 8 and 16 are integer codes; 32 is IEEE float (SampleFormat 3), written
+    // as it is: no clamp, no scaling, negative and above-one samples kept.
+    if (bits != 8 && bits != 16 && bits != 32) { error = "TIFF bits must be 8, 16 or 32 (float)"; return false; }
+    if (bits == 32 && (cineon || reduced)) { error = "float TIFF has no Cineon or preview form"; return false; }
+    if (bits == 32 && std::endian::native != std::endian::little) {
+        error = "float TIFF is written on little-endian hosts only"; return false;
+    }
     if (!w || !h) { error = "TIFF dimensions must be non-zero"; return false; }
     const uint64_t row_bytes = uint64_t(w) * 3 * (bits / 8);
     // Check before multiplying: dimensions are supplied by callers, and a
@@ -591,6 +597,7 @@ static bool tiff_prefix(uint32_t w, uint32_t h, uint32_t bits, const std::vector
     ifd.rational(283, 72, 1);
     ifd.shorts(284, {1});
     ifd.shorts(296, {2});
+    if (bits == 32) ifd.shorts(339, {3, 3, 3});
     ifd0_fields(ifd, exif_fields_in);
     if (!icc.empty()) ifd.undefined(34675, icc);
     size_t exif_pointer = 0;
@@ -627,7 +634,7 @@ bool encode_tiff(const void* rgb, uint32_t w, uint32_t h, uint32_t bits, const s
     if (!tiff_prefix(w, h, bits, icc, out, image_bytes, error, exif_fields_in)) return false;
     const size_t start = out.size();
     out.resize(start + image_bytes);
-    if (bits == 8) std::memcpy(&out[start], rgb, image_bytes);
+    if (bits != 16) std::memcpy(&out[start], rgb, image_bytes);   // bytes, or little-endian floats
     else {
         const auto* src = static_cast<const uint8_t*>(rgb);
         for (size_t i = 0; i < image_bytes; i += 2) {
@@ -787,6 +794,7 @@ static int64_t next_tiff_page(std::FILE* file, std::string& error) {
 bool encode_tiff_file(std::FILE* file,const void* rgb,uint32_t w,uint32_t h,uint32_t bits,
                       const std::vector<uint8_t>& icc,const TiffOptions& options,std::string& error,const Exif* exif){
     if(!options.lzw&&!options.embed_preview)return encode_tiff_file(file,rgb,w,h,bits,icc,error,exif);
+    if(bits==32){error="float TIFF is written uncompressed and without a preview page";return false;}
     if(!file||!rgb){error="TIFF file or pixels are null";return false;}
     uint64_t pointer=0;if(!write_tiff_page(file,rgb,w,h,bits,icc,exif,false,false,options.lzw,pointer,error))return false;
     if(!options.embed_preview)return true;

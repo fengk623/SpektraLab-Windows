@@ -69,7 +69,10 @@ struct Exif {
     ExifValues extra;
 };
 
-// Interleaved 3-channel encoded samples. `exif` may be null.
+// Interleaved 3-channel samples. `bits` 8 or 16: encoded integer codes.
+// `bits` 32: IEEE float (SampleFormat 3), written as it is -- the linear
+// working-space TIFF raw-to-tiff produces -- uncompressed, one page; the
+// TiffOptions overload refuses it. `exif` may be null.
 bool encode_tiff(const void* rgb, uint32_t width, uint32_t height, uint32_t bits,
                  const std::vector<uint8_t>& icc, std::vector<uint8_t>& out, std::string& error,
                  const Exif* exif = nullptr);
