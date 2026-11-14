@@ -363,10 +363,11 @@ printed by the run's "Test package checksums" step:
 Both hosts in it answer `hello` as `0.1.0+a8deaaa`.
 
 Earlier runs on the branch are part of the record. Run 43375122469
-(`c2091d8`): all seven jobs green; its package is the one the first
-real-machine round tested. Run 43372366886
-(`f284ff6`): all seven jobs green with the same counts, except cargo 24
-(the display cache test did not exist yet). Run 43374620198 (`f9ebf81`): cancelled by the next
+(`c2091d8`): all seven jobs green (vitest 463, before the two
+refused-setting cases and the DNG smoke scenario); its package is the one
+the first real-machine round tested. Run 43372366886
+(`f284ff6`): all seven jobs green, with vitest 463 and cargo 24
+(the display cache test did not exist yet either). Run 43374620198 (`f9ebf81`): cancelled by the next
 dispatch on the branch (the workflow keeps one run per ref), no result. Run 43369606838
 (`b67a291`): everything above passed except `spk_raw_photocraft` on MSVC,
 which failed in the test's own message formatting (`path::string()` throws on
