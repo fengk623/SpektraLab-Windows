@@ -233,17 +233,19 @@ unless one of the first two rules is used.
 | Canon CR3; Nikon HE/HE*; Phase One IIQ; Sony ARQ; formats PhotoCraft does not decode | LibRaw (where LibRaw decodes them) | needs decoder support in PhotoCraft first |
 | Thumbnails and embedded previews | LibRaw | not part of this change |
 
-Sample status (TEST-01). None has been run: no camera file is available in
-the environment this was developed in.
+Sample status (TEST-01), after the first real-machine round (2026-11-13,
+build `c2091d8`, Windows 11 25H2, RTX 4090; see "First real-machine round"
+below). Nothing is accepted yet.
 
 | Sample | Compression / depth | LibRaw path | PhotoCraft path |
 |---|---|---|---|
-| Sony α7R V ARW | to be read from the file | pending | pending |
-| Fujifilm ~102 MP RAF | to be read from the file | pending (GFX100RF compatible16 / headroom accepted 2026-10-29) | pending |
-| Canon RAW (CR2; CR3 is not decoded by PhotoCraft) | to be read from the file | pending | pending |
-| Nikon lossless NEF | to be read from the file | pending | pending |
-| DNG | to be read from the file | pending | pending |
-| Nikon HE/HE*, Phase One IIQ, Sony ARQ | | as recorded in RAW-SUPPORT-20261029.md | not decoded by PhotoCraft |
+| Sony α7R V ARW (`_DSC0419.ARW`) | `sony_ljpeg_load_raw()`, 14-bit RGGB | `raw-to-tiff` passed, 9566 x 6374; in-app run not evidenced, repeat | `raw-to-tiff` passed, 9504 x 6336; opened, adjusted and exported in the app |
+| Fujifilm GFX 100S RAF (`5287531644.raf`) | not recorded yet (no `raw-to-tiff` report) | opened, adjusted, exported, 11662 x 8746 | opened, adjusted, exported, 11648 x 8736 |
+| Canon RAW (CR2; CR3 is not decoded by PhotoCraft) | | no sample yet | no sample yet |
+| Nikon lossless NEF | | no sample yet | no sample yet |
+| Sigma fp DNG (`FP_00090.DNG`) | not recorded yet | opened, 6040 x 4040; white balance and export failed in `c2091d8`, fixed, repeat | opened, 6016 x 4012; white balance and export failed in `c2091d8`, fixed, repeat |
+| Nikon Z50II NEF, HE family (`0989034613.nef`) | fails: LibRaw 0.22.2 does not recognise the file as HE and reports corrupt data | refused: "Nikon High Efficiency / High Efficiency* NEF (unsupported)" |
+| Phase One IIQ, Sony ARQ | | as recorded in RAW-SUPPORT-20261029.md | not decoded by PhotoCraft |
 
 The procedure and the record template are
 `desktop/docs/validation/RAW-PHOTOCRAFT.md`.
@@ -386,17 +388,72 @@ X-Trans; colour against the LibRaw path on real scenes; orientation and image
 area on real files; lens correction and the neutral picker on a PhotoCraft
 frame; custom white balance on a non-DNG; timing and memory at 45 MP and
 102 MP; in-app adjustment and full-size export with PhotoCraft as the
-decoder. The hosted Windows runner has no Vulkan driver, so even the engine
+decoder. The first real-machine round below covers part of this for two
+cameras; this list is what CI and the development machine cannot show. The hosted Windows runner has no Vulkan driver, so even the engine
 itself only runs under lavapipe in CI.
+
+### First real-machine round (2026-11-13, `c2091d8`)
+
+Windows 11 25H2 (26200.9974), RTX 4090, the portable package of run
+43375122469. What it found, and what was done:
+
+* **A DNG could not be exported once its white balance had been touched, with
+  either decoder.** LibRaw publishes no `cam_xyz` for a DNG, so the host had
+  no Kelvin/tint for one: no As Shot reading (the "As Shot" boxes were dead),
+  and every custom value refused. The app kept the refused value in the frame's
+  edit all the same; an export decodes with the saved edit and failed on it.
+  This was in the LibRaw path before this branch; the Sigma DNG exposed it.
+  Fixed in two places. The host takes a DNG's XYZ -> camera matrix from the
+  file (`spk::io::xyz_to_camera_matrix`: AnalogBalance x CameraCalibration x
+  the ColorMatrix of the D65, else another daylight, calibration illuminant,
+  which is LibRaw's own choice), so a DNG has As Shot, custom white balance
+  and the neutral picker with both decoders. And the app returns the edit to
+  the last decode the host accepted when the host refuses a setting, so a
+  file that really has no calibration cannot get into that state. Reproduced
+  before the fix on the synthetic DNG (`spk_host_raw_photocraft` failed with
+  "a DNG reports no As Shot temperature and tint"); `host_smoke.py` now walks
+  the tester's sequence on the real host with both decoders. Not yet repeated
+  on the Sigma file.
+* **The app's Sony "LibRaw" export was a PhotoCraft export.** The log of that
+  session opens the Fuji file at 11648 x 8736, PhotoCraft's size for it, and
+  the Sony at 9504 x 6336, PhotoCraft's size for it (LibRaw develops
+  9566 x 6374, as the `raw-to-tiff` report shows). The environment variable
+  was still set, most likely. Nothing in the app's log said which decoder ran,
+  and the `open` reply's `raw_decoder.backend` was in fact empty: the host
+  built the reply from metadata it had already moved into the session. Fixed:
+  the reply and the export result name the decoder, and the host logs it on
+  every open, redecode and export (`..., raw photocraft
+  (SPEKTRALAB_RAW_BACKEND)`). The in-app LibRaw run on the Sony file is still
+  to be done.
+* **Image area.** PhotoCraft develops the area the camera declares as its
+  picture: 9504 x 6336 (α7R V), 11648 x 8736 (GFX 100S), 6016 x 4012 (the
+  DNG's DefaultCrop, and the size of the camera's own JPEG of that frame).
+  LibRaw keeps a border the camera does not: 9566 x 6374, 11662 x 8746,
+  6040 x 4040. The difference is at most 62 x 38 pixels, is present from the
+  decode on, and is reported as a warning in the `open` reply and the
+  `raw-to-tiff` report. Not changed. Geometry saved in pixels under one
+  decoder (a crop) is therefore not pixel-identical under the other; that is
+  one of the things acceptance of a camera has to look at.
+* **Nikon Z50II, HE family.** Neither decoder develops it. PhotoCraft says
+  so. LibRaw 0.22.2 does not recognise the file as HE, tries another decoder
+  and reports corrupt data; the existing explicit HE message only covers files
+  LibRaw itself identifies. Left as it is here: it is LibRaw-path behaviour
+  from before this branch, tracked with RAW 01 (Nikon HE/HE*).
+* Timings on that machine, one observation each: Sony `raw-to-tiff` decode
+  842 ms (PhotoCraft) against 1799 ms (LibRaw); Fuji in-app decode 1902 ms
+  against 2380 ms. Peak process memory for the Sony file about 2.0 GiB with
+  either. No three-run series and no VRAM figures yet.
 
 ## Known limitations
 
 * Colour for non-DNG files depends on LibRaw's matrix table. A camera LibRaw
   has no matrix for is refused by this path.
-* LibRaw keeps a DNG's matrices outside `cam_xyz`, so the host's Kelvin/tint
-  (custom white balance, as-shot temperature, the neutral picker) is
-  unavailable for DNG. That is the existing behaviour with LibRaw as the
-  decoder too; PhotoCraft does not change it.
+* Kelvin/tint for a DNG uses one of the file's matrices (D65, else another
+  daylight illuminant), not the DNG specification's interpolation between two
+  illuminants: the same approximation as for every other camera, and As Shot
+  round-trips exactly. A DNG with no daylight calibration has no Kelvin/tint.
+* PhotoCraft's image area is the camera's declared picture; LibRaw's is a few
+  dozen pixels larger. See the first real-machine round above.
 * Highlights are clipped at the white-balanced white level, not
   reconstructed. `headroom`'s unclipped channels have no PhotoCraft
   equivalent.

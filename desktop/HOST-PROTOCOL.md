@@ -556,13 +556,21 @@ for the same file however it arrives.
 
 `raw_mode` selects LibRaw's range policy only; PhotoCraft has one range
 (32-bit float, not clamped to 0..1) and ignores it. Custom white balance uses
-the same Kelvin/tint mapping with either decoder. Lens correction runs on a
+the same Kelvin/tint mapping with either decoder. The camera side of that
+mapping is LibRaw's table matrix, or for a DNG the file's own daylight
+ColorMatrix (with its CameraCalibration and AnalogBalance), so a DNG reports
+`as_shot` and accepts `custom` like any other RAW; a file with neither is
+`unsupported`. Lens correction runs on a
 PhotoCraft frame through the same code, and has not been validated on real
 files. An export whose `decode.raw_backend`
 differs from the open session's is rendered from a private re-decode, as for
 `raw_mode`.
 
-For a RAW file the `open` reply carries
+For a RAW file the `open` and `redecode` replies carry the object below, and
+the `export_frame` / `export_cineon` result carries its `backend` and `reason`
+(the decoder behind the exported pixels). The host also logs it on each of
+the three: `open s1 <path> 9504x6336 decode 842 ms, open 600 ms, raw photocraft
+(SPEKTRALAB_RAW_BACKEND)`.
 `raw_decoder: {backend: "libraw"|"photocraft", reason, decoder, libraw_decoder?, format?, white_balance_source?, calibration?, warnings?}`.
 `reason` says which rule chose the decoder (`"decode.raw_backend"`,
 `"SPEKTRALAB_RAW_BACKEND"`, `"accepted: <record>"`,

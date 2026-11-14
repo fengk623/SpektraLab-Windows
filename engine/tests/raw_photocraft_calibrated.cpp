@@ -90,11 +90,12 @@ int main(int argc, char** argv) {
             require(std::abs(white - patch(photocraft, clip).rgb[row]) < 1e-4, "camera_to_output");
         }
         // LibRaw keeps a DNG's matrices in its DNG colour block and leaves
-        // cam_xyz empty, with either decoder; the host's Kelvin/tint for a DNG
-        // is unavailable on both paths for that reason. Reported, not required.
-        double weight = 0;
-        for (float v : m.camera_from_xyz) weight += std::abs(v);
-        std::cout << "LibRaw XYZ -> camera matrix for this DNG: " << (weight > 0 ? "present" : "absent") << '\n';
+        // cam_xyz empty. The host's Kelvin/tint and neutral picker need one, so
+        // the metadata carries the file's own daylight ColorMatrix (the
+        // fixture has no CameraCalibration or AnalogBalance), with either
+        // decoder. PhotoCraft still develops with the file's calibration.
+        for (int i = 0; i < 9; ++i)
+            require(std::abs(m.camera_from_xyz[i] - kColorMatrix[i]) < 1e-4, "the DNG's XYZ -> camera matrix (PhotoCraft path)");
         require(photocraft.timings.total_ms > 0 && photocraft.timings.process_ms > 0, "timings");
         for (const std::string& w : m.photocraft->warnings) std::cout << "warning: " << w << '\n';
         require(m.photocraft->warnings.empty(), "PhotoCraft and LibRaw read the fixture differently");
@@ -131,6 +132,8 @@ int main(int argc, char** argv) {
         require(spk::io::decode_raw_compatible(fixtures / "patches.dng", libraw, error), "LibRaw: " + error);
         require(libraw.metadata.backend == "libraw" && libraw.width == photocraft.width && libraw.height == photocraft.height,
                 "LibRaw frame");
+        for (int i = 0; i < 9; ++i)
+            require(std::abs(libraw.metadata.camera_from_xyz[i] - kColorMatrix[i]) < 1e-4, "the DNG's XYZ -> camera matrix (LibRaw path)");
         std::cout << "patch       PhotoCraft (R G B)              LibRaw compatible16 (R G B)\n";
         double worst_grey = 0, worst_colour = 0;
         for (int i = 0; i < patches; ++i) {

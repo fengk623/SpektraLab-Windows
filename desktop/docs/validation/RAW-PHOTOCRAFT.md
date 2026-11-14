@@ -102,8 +102,22 @@ $env:SPEKTRALAB_RAW_BACKEND = 'photocraft'
 & 'C:\Program Files\SpektraLab\spektralab.exe'
 ```
 
-不设该变量（或设为 `libraw`）重开应用，即为 LibRaw 对照。切换后端必须重开应用：变量在
-应用启动时读取一次。磁盘上的显示缓存按后端分开存放，切换后不会显示另一后端留下的画面，
+LibRaw 对照要**显式**设成 `libraw` 再重开应用。同一个 PowerShell 窗口里变量会一直留着，
+只是“不再设一次”等于仍然是 PhotoCraft（第一轮的 Sony 对照就是这样跑成了两次 PhotoCraft）：
+
+```powershell
+$env:SPEKTRALAB_RAW_BACKEND = 'libraw'
+& 'C:\Program Files\SpektraLab\spektralab.exe'
+```
+
+每次打开、重解码、导出，宿主都会在应用日志里写出实际后端，以这一行为准，不以输出目录名为准：
+
+```
+spektralab-host info: open s1 _DSC0419.ARW 9504x6336 decode 842 ms, open 600 ms, raw photocraft (SPEKTRALAB_RAW_BACKEND)
+spektralab-host info: export s1 _DSC0419_Portra_800.tif 9504x6336, raw photocraft (SPEKTRALAB_RAW_BACKEND)
+```
+
+把两种后端各自的这两行原文贴进回传。切换后端必须重开应用：变量在应用启动时读取一次。磁盘上的显示缓存按后端分开存放，切换后不会显示另一后端留下的画面，
 无需手动清缓存。两种后端下，同一样片各做一遍：
 
 | 步骤 | PhotoCraft | LibRaw | 差异 / 备注 |

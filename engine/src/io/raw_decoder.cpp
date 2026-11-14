@@ -87,6 +87,25 @@ bool libraw_ok(int status, const char* stage, std::string& error) {
     return false;
 }
 
+bool usable_matrix(const std::array<double, 9>& m) {
+    double weight = 0;
+    for (double v : m) weight += std::fabs(v);
+    return weight > 0 && std::isfinite(weight);
+}
+
+// LibRaw's own choice of a DNG's calibration (identify.cpp): D65 first, then
+// the first daylight-type illuminant. -1 when the file has neither.
+int dng_daylight_calibration(const libraw_colordata_t& color) {
+    for (int i = 0; i < 2; ++i)
+        if (color.dng_color[i].illuminant == LIBRAW_WBI_D65) return i;
+    for (int i = 0; i < 2; ++i) {
+        const int ill = color.dng_color[i].illuminant;
+        if (ill == LIBRAW_WBI_Daylight || ill == LIBRAW_WBI_D55 || ill == LIBRAW_WBI_D75 ||
+            ill == LIBRAW_WBI_D50 || ill == LIBRAW_WBI_Flash) return i;
+    }
+    return -1;
+}
+
 bool supported_compression(LibRaw& raw, std::string& error) {
     const char* decoder = raw.unpack_function_name();
     if (decoder && std::strstr(decoder, "nikon_he_load_raw") != nullptr) {
@@ -170,9 +189,10 @@ bool capture_source_metadata(const LibRaw& raw, RawMetadata& metadata,
         sizes.pixel_aspect};
     metadata.raw_flip = sizes.flip;
     metadata.colour_channels = data.idata.colors;
-    for (unsigned row = 0; row < 3; ++row)
-        for (unsigned col = 0; col < 3; ++col)
-            metadata.camera_from_xyz[row * 3 + col] = color.cam_xyz[row][col];
+    // The neutral picker's matrix: the table's, or a DNG's own.
+    std::array<double, 9> xyz_to_camera{};
+    if (xyz_to_camera_matrix(raw, xyz_to_camera))
+        for (unsigned i = 0; i < 9; ++i) metadata.camera_from_xyz[i] = float(xyz_to_camera[i]);
     metadata.as_shot_wb_applied = color.as_shot_wb_applied != 0;
     metadata.black = color.black;
     metadata.white_level = color.maximum;
@@ -592,12 +612,18 @@ PhotocraftStatus decode_raw_photocraft_calibrated(const std::filesystem::path& s
                 for (int row = 0; row < 3; ++row)
                     for (int col = 0; col < 3; ++col) {
                         matrix[row * 3 + col] = color.cam_xyz[row][col];
-                        metadata.camera_from_xyz[row * 3 + col] = color.cam_xyz[row][col];
                         weight += std::fabs(color.cam_xyz[row][col]);
                     }
                 // LibRaw's table is the D65 calibration (Adobe ColorMatrix2).
+                // Empty for a DNG, which PhotoCraft develops with the file's
+                // own matrices.
                 if (weight > 0 && std::isfinite(weight)) request.color_matrix = matrix;
             }
+            // What the host's Kelvin/tint and neutral picker work with: the
+            // table's matrix, or a DNG's own.
+            std::array<double, 9> xyz_to_camera{};
+            if (xyz_to_camera_matrix(*raw, xyz_to_camera))
+                for (unsigned i = 0; i < 9; ++i) metadata.camera_from_xyz[i] = float(xyz_to_camera[i]);
             for (int row = 0; row < 3; ++row)
                 for (int col = 0; col < 4; ++col) metadata.rgb_cam[row * 4 + col] = color.rgb_cam[row][col];
         }
@@ -651,6 +677,42 @@ PhotocraftStatus decode_raw_photocraft_calibrated(const std::filesystem::path& s
         error = "RAW decode (PhotoCraft): unknown exception";
         return PhotocraftStatus::Internal;
     }
+}
+
+
+bool xyz_to_camera_matrix(const LibRaw& raw, std::array<double, 9>& matrix) {
+    const auto& data = raw.imgdata;
+    const auto& color = data.color;
+    if (data.idata.colors != 3) return false;
+    std::array<double, 9> m{};
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col) m[row * 3 + col] = color.cam_xyz[row][col];
+    if (usable_matrix(m)) { matrix = m; return true; }
+    if (!data.idata.dng_version) return false;
+    const int index = dng_daylight_calibration(color);
+    if (index < 0) return false;
+    const auto& dng = color.dng_color[index];
+    // An absent CameraCalibration is the identity, an absent AnalogBalance 1.
+    double calibration[3][3];
+    double calibration_weight = 0;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col) calibration_weight += std::fabs(dng.calibration[row][col]);
+    const bool calibrated = calibration_weight > 0 && std::isfinite(calibration_weight);
+    for (int row = 0; row < 3; ++row) {
+        const double balance = color.dng_levels.analogbalance[row];
+        const double gain = balance > 0 && std::isfinite(balance) ? balance : 1.0;
+        for (int col = 0; col < 3; ++col)
+            calibration[row][col] = gain * (calibrated ? double(dng.calibration[row][col]) : (row == col ? 1.0 : 0.0));
+    }
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col) {
+            double v = 0;
+            for (int k = 0; k < 3; ++k) v += calibration[row][k] * dng.colormatrix[k][col];
+            m[row * 3 + col] = v;
+        }
+    if (!usable_matrix(m)) return false;
+    matrix = m;
+    return true;
 }
 
 }  // namespace spk::io

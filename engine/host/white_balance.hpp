@@ -6,8 +6,10 @@
 // is the scale Lightroom, ACR and -- to the extent it is documented -- Core
 // Image's CIRAWFilter use, so a value means roughly what it means on macOS.
 //
-// The camera side is LibRaw's own XYZ->camera matrix (`cam_xyz`, the
-// DNG/Adobe ColorMatrix for D65), applied to the illuminant's XYZ: the
+// The camera side is the file's XYZ->camera matrix: LibRaw's `cam_xyz` (the
+// Adobe ColorMatrix for D65) for a camera in its table, a DNG's own
+// daylight ColorMatrix otherwise (spk::io::xyz_to_camera_matrix). It is
+// applied to the illuminant's XYZ: the
 // neutral's camera response, whose reciprocal is the multiplier set. One
 // matrix, not the DNG SDK's interpolation between two calibration
 // illuminants, so far from D65 the mapping is an approximation; As Shot is

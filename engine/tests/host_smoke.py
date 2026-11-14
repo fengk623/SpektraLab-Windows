@@ -410,6 +410,67 @@ def extras(host, sid, path, tmp, label, raw, probe):
         check(not h["ok"] and h["error"]["code"] == "unsupported", f"{label}: white balance on a raster unsupported")
 
 
+def dng_decoders(host, tmp):
+    """A DNG through both RAW decoders, as the app drives them.
+
+    The first real-machine round (a Sigma DNG) found three things no test
+    covered: a DNG had no As Shot temperature and refused every custom white
+    balance, so a frame whose saved edit carried one could not be exported with
+    either decoder; and the open reply named no decoder, because it read the
+    frame's metadata after that had been moved into the session. The fixture is
+    synthetic (engine/tools/make_photocraft_fixtures.py), lit by D55.
+    """
+    dng = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "photocraft", "patches.dng")
+    h, _ = host.call("probe", {"path": dng})
+    if not check(h["ok"], "dng: probe", h.get("error")):
+        return
+    shot = h["result"]["metadata"].get("as_shot")
+    if not check(shot is not None, "dng: As Shot temperature and tint are reported", str(h["result"]["metadata"])):
+        return
+    check(5350 <= shot["temperature_k"] <= 5650 and abs(shot["tint"]) < 25, "dng: As Shot reads the D55 light", str(shot))
+    edited = {"mode": "custom", "temperature_k": 6800, "tint": 30}
+    for backend in ("libraw", "photocraft"):
+        label = f"dng/{backend}"
+        h, _ = host.call("open", {"path": dng, "decode": {"raw_backend": backend}})
+        if not h["ok"] and backend == "photocraft" and "unavailable" in h["error"]["message"]:
+            print("  skip dng/photocraft: this host was built without PhotoCraft", flush=True)
+            continue
+        if not check(h["ok"], f"{label}: open", h.get("error")):
+            continue
+        sid = h["result"]["session"]
+        raw = h["result"].get("raw_decoder", {})
+        check(raw.get("backend") == backend and raw.get("reason") == "decode.raw_backend" and bool(raw.get("decoder")),
+              f"{label}: the open reply names the decoder that ran", str(raw))
+        h, base = host.call("render", {"session": sid, "tier": "live", "format": "rgba8"})
+        check(h["ok"], f"{label}: render", h.get("error"))
+        h, _ = host.call("get_params", {"session": sid})
+        params = h["result"]["params"] if h["ok"] else {}
+        export = {"session": sid, "format": "tiff16", "color_space": "prophoto", "params": params,
+                  "adjustments": {}, "geometry": {}, "generation": 1}
+        # The saved edit has a white balance the session was not decoded with:
+        # the export decodes privately with it. This is the export that failed.
+        out = os.path.join(tmp, f"dng-{backend}-edited.tif")
+        h, _ = host.call("export_frame", {**export, "path": out,
+                                          "decode": {"raw_backend": backend, "white_balance": edited}})
+        if check(h["ok"], f"{label}: export with a white balance edit pending", h.get("error")):
+            raw = h["result"].get("raw_decoder", {})
+            check(os.path.getsize(out) == h["result"]["bytes"] and raw.get("backend") == backend,
+                  f"{label}: the export names its decoder", str(raw))
+        h, _ = host.call("redecode", {"session": sid, "decode": {"raw_backend": backend, "white_balance": edited}})
+        if check(h["ok"], f"{label}: redecode 6800 K, tint +30", h.get("error")):
+            check(h["result"].get("raw_decoder", {}).get("backend") == backend, f"{label}: redecode keeps the decoder")
+            h, warm = host.call("render", {"session": sid, "tier": "live", "format": "rgba8"})
+            b, w = mean_rgb(base), mean_rgb(warm)
+            check(h["ok"] and w[0] - w[2] > b[0] - b[2], f"{label}: a higher Kelvin renders warmer",
+                  f"R-B {b[0] - b[2]:.1f} -> {w[0] - w[2]:.1f}")
+            out = os.path.join(tmp, f"dng-{backend}-session.tif")
+            h, _ = host.call("export_frame", {**export, "path": out, "generation": 2,
+                                              "decode": {"raw_backend": backend, "white_balance": edited}})
+            check(h["ok"] and os.path.getsize(out) == h["result"]["bytes"],
+                  f"{label}: export from the redecoded session", h.get("error"))
+        host.call("close", {"session": sid})
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", required=True)
@@ -489,6 +550,7 @@ def main():
     check(not h["ok"] and h["error"]["code"] == "decode_failed"
           and "no usable embedded preview" in h["error"]["message"] and not px,
           "embedded-only RAW without preview does not fall back to decoding", h.get("error"))
+    dng_decoders(host, tmp)
     exercise(host, png, tmp, "png", False)
     # A folder and file named outside ASCII: the wire is UTF-8, Windows needs
     # wide APIs underneath (platform.cpp), and a regression there is silent.

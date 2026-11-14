@@ -76,6 +76,46 @@ describe('decoded source preview', () => {
   });
 });
 
+describe('a decode setting the host refuses', () => {
+  // First real-machine round: a file with no calibration refused every white
+  // balance, but the edit kept the refused value. The sliders then described a
+  // picture that was never decoded and every export of the frame failed.
+  const refusal = () => Object.assign(new Error('no three-colour XYZ matrix for this file'), { code: 'unsupported' });
+
+  it('returns the edit to what the picture was decoded with, and says why', async () => {
+    await session.select('/owned/b.ARW');
+    await vi.advanceTimersByTimeAsync(1);
+    session.setDecode((d) => ({ ...d, whiteBalance: 'Custom', temperature: 6000 }));
+    await vi.advanceTimersByTimeAsync(351);
+    expect(state().sidecar.decode).toMatchObject({ whiteBalance: 'Custom', temperature: 6000 });
+    fake.redecode.mockRejectedValueOnce(refusal());
+    session.setDecode((d) => ({ ...d, temperature: 6800, tint: 30 }));
+    await vi.advanceTimersByTimeAsync(351);
+    expect(state().lastError).toContain('no three-colour XYZ matrix');
+    // Back to the last decode the host accepted, not to the refused one.
+    expect(state().sidecar.decode).toMatchObject({ whiteBalance: 'Custom', temperature: 6000, tint: 0 });
+    // And the same value can be tried again: nothing remembers it as applied.
+    fake.redecode.mockClear();
+    session.setDecode((d) => ({ ...d, temperature: 6800, tint: 30 }));
+    await vi.advanceTimersByTimeAsync(351);
+    expect(fake.redecode).toHaveBeenCalledWith('s2', expect.objectContaining({ white_balance: { mode: 'custom', temperature_k: 6800, tint: 30 } }));
+    expect(state().sidecar.decode).toMatchObject({ whiteBalance: 'Custom', temperature: 6800, tint: 30 });
+  });
+
+  it('falls back to the camera\'s own decode when nothing was accepted before, and keeps other failures as they were', async () => {
+    fake.redecode.mockRejectedValueOnce(refusal());
+    session.setDecode((d) => ({ ...d, whiteBalance: 'Custom', temperature: 6800, tint: 30, lensCorrection: true }));
+    await vi.advanceTimersByTimeAsync(351);
+    expect(state().sidecar.decode).toMatchObject({ whiteBalance: 'As Shot', lensCorrection: false });
+    // A failure that is not a refusal (the host died, the file went away)
+    // says nothing about the setting: the edit stays for a retry.
+    fake.redecode.mockRejectedValueOnce(new Error('pipe closed'));
+    session.setDecode((d) => ({ ...d, whiteBalance: 'Custom', temperature: 4000, tint: 0 }));
+    await vi.advanceTimersByTimeAsync(351);
+    expect(state().sidecar.decode).toMatchObject({ whiteBalance: 'Custom', temperature: 4000 });
+  });
+});
+
 describe('neutral RAW white balance', () => {
   it('uses normalized source coordinates, records one undo and restores the previous preview mode', async () => {
     session.startNeutralPick();

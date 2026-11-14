@@ -42,15 +42,12 @@ bool invert3(const double m[9], double out[9]) {
     return true;
 }
 
+// The table's matrix, or a DNG's own (spk::io::xyz_to_camera_matrix).
 bool camera_matrix(const LibRaw& raw, double m[9]) {
-    if (raw.imgdata.idata.colors != 3) return false;
-    double sum = 0;
-    for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 3; ++c) {
-            m[r * 3 + c] = raw.imgdata.color.cam_xyz[r][c];
-            sum += std::fabs(m[r * 3 + c]);
-        }
-    return sum > 0 && std::isfinite(sum);
+    std::array<double, 9> matrix{};
+    if (!spk::io::xyz_to_camera_matrix(raw, matrix)) return false;
+    std::copy(matrix.begin(), matrix.end(), m);
+    return true;
 }
 
 }  // namespace
@@ -162,7 +159,8 @@ bool multipliers_for(const LibRaw& raw, double temperature, double tint, std::ar
                      std::string& error) {
     double m[9];
     if (!camera_matrix(raw, m)) {
-        error = "this camera has no three-colour XYZ matrix in LibRaw; white balance cannot be set";
+        error = "no three-colour XYZ matrix for this file (not in LibRaw's camera table, and no daylight "
+                "calibration in the file); white balance cannot be set";
         return false;
     }
     double x, y;

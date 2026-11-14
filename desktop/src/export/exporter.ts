@@ -289,10 +289,10 @@ export async function exportFrame(
       color_space: r.colorSpace, long_edge: r.format === 'di' ? 0 : r.longEdge, overwrite: target.overwrite, progress_id: job.progressId,
     }, { timeoutMs: 1_800_000 });
     if (res.payload.byteLength) throw new Error(tz('export_frame unexpectedly returned image data.', 'export_frame 意外返回了图像数据。'));
-    const { path, width, height, timings_ms } = res.result;
+    const { path, width, height, timings_ms, raw_decoder } = res.result;
     if (typeof path !== 'string' || typeof width !== 'number' || typeof height !== 'number' || width <= 0 || height <= 0)
       throw new Error(tz('The engine returned invalid export dimensions.', '引擎返回的导出尺寸无效。'));
-    platform().log('info', `export (${hostFormat(r)}, ${width}x${height}) host ms: ${JSON.stringify(timings_ms ?? {})} · TOTAL ${Math.round(performance.now() - started)}`);
+    platform().log('info', `export (${hostFormat(r)}, ${width}x${height}) host ms: ${JSON.stringify(timings_ms ?? {})} · raw decoder ${JSON.stringify(raw_decoder ?? null)} · TOTAL ${Math.round(performance.now() - started)}`);
     return { kind: 'written', path, width, height, carriesEdits: r.format !== 'di' };
   } catch (e) {
     if (cancelled() && (e as { code?: string }).code === 'cancelled') return { kind: 'cancelled' };

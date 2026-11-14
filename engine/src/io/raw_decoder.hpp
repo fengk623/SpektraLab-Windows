@@ -9,7 +9,20 @@
 
 #include "raw_photocraft.hpp"
 
+class LibRaw;
+
 namespace spk::io {
+
+// The XYZ -> camera matrix of an opened file (row-major 3x3), the calibration
+// the host's Kelvin/tint works with. For a camera in LibRaw's table that is
+// `cam_xyz` (Adobe's ColorMatrix for D65). LibRaw leaves `cam_xyz` empty for
+// a DNG and builds the same matrix privately from the file's own tags; this
+// repeats that construction from the fields LibRaw does publish:
+// AnalogBalance x CameraCalibration x ColorMatrix of the D65 calibration
+// illuminant, else of another daylight-type one (LibRaw's choice, in
+// identify.cpp). False for a file with neither, and for anything but three
+// colours.
+bool xyz_to_camera_matrix(const LibRaw& raw, std::array<double, 9>& matrix);
 
 // The limit applies to one decode; callers still serialize full-size RAW jobs.
 // SPEKTRALAB_RAW_THREADS overrides the default min(8, logical CPUs), clamped to
@@ -145,8 +158,8 @@ bool decode_raw_headroom(const std::filesystem::path& source, const std::array<f
 
 // PhotoCraft decodes and develops (raw_photocraft.hpp); LibRaw supplies what
 // PhotoCraft has no table for. The file is opened with LibRaw for metadata
-// only (no unpack): its XYZ -> camera matrix (cam_xyz, the D65 calibration
-// the host's Kelvin/tint also uses) is handed to PhotoCraft as the colour
+// only (no unpack): its table's XYZ -> camera matrix (cam_xyz, the D65
+// calibration) is handed to PhotoCraft as the colour
 // calibration of every non-DNG file, and its as-shot multipliers are the
 // fallback when PhotoCraft reads none from the file. A DNG is developed with
 // its own matrices. `user_mul` is a caller-chosen white balance as for the

@@ -8,7 +8,8 @@
 // the plumbing and the numbers: the same rule picks the decoder however a
 // file arrives, PhotoCraft's frame reaches the host unclamped and matches the
 // DNG reference, the float TIFF reads back bit for bit through the reader the
-// app opens TIFFs with, and a failure leaves the next decode working.
+// app opens TIFFs with, a failure leaves the next decode working, and a DNG
+// has a Kelvin/tint white balance with either decoder.
 #include "image_io.hpp"
 #include "io/linear_prophoto_icc.hpp"
 #include "json.hpp"
@@ -17,6 +18,7 @@
 #include "raw_backend.hpp"
 #include "raw_tiff_cli.hpp"
 #include "tiff_ifd.hpp"
+#include "white_balance.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -314,7 +316,70 @@ int main(int argc, char** argv) {
         check_patches(decode(fixtures / "patches.dng", "photocraft"), "after the failures");
         require(decode(tiff, "auto").rgb == photocraft.rgb, "an ordinary TIFF no longer opens after a failed RAW");
 
-        std::cout << "host RAW boundary: PhotoCraft and LibRaw behind one rule; float TIFF exact; raw-to-tiff verified\n";
+        // --- 5. White balance on a DNG -----------------------------------------
+        // LibRaw publishes no cam_xyz for a DNG, so the host had no Kelvin/tint
+        // for one: no As Shot reading, every custom value refused, and an
+        // export of a frame whose saved edit carried one failed (first
+        // real-machine round, a Sigma DNG, both decoders). The file's own
+        // daylight ColorMatrix is the calibration now.
+        {
+            using namespace spk_fixture;
+            Probe dng;
+            require(probe_file(fixtures / "patches.dng", dng, error), "probe: " + error);
+            require(dng.metadata.as_shot_temperature_k && dng.metadata.as_shot_tint, "a DNG reports no As Shot temperature and tint");
+            const double shot_k = *dng.metadata.as_shot_temperature_k, shot_tint = *dng.metadata.as_shot_tint;
+            // The fixture's AsShotNeutral is its ColorMatrix's response to a
+            // D55 white (make_photocraft_fixtures.py); D55 is x 0.33242, y 0.34743.
+            double want_k = 0, want_tint = 0;
+            xy_to_temperature_tint(0.33242, 0.34743, want_k, want_tint);
+            require(want_k > 5400 && want_k < 5600, "the reference temperature of D55 is off: " + std::to_string(want_k));
+            require(std::abs(shot_k - want_k) < 15 && std::abs(shot_tint - want_tint) < 1,
+                    "As Shot of the DNG is " + std::to_string(shot_k) + " K, tint " + std::to_string(shot_tint) +
+                        "; a D55 white is " + std::to_string(want_k) + " K, tint " + std::to_string(want_tint));
+            const int grey = 1;   // mid_grey
+            for (const char* backend : {"photocraft", "libraw"}) {
+                const std::string who = backend;
+                const FloatImage as_shot = decode(fixtures / "patches.dng", backend);
+                DecodeOptions options;
+                options.raw_backend = backend;
+                options.temperature_k = shot_k;
+                options.tint = shot_tint;
+                FloatImage custom;
+                Probe p;
+                require(decode_linear_prophoto(fixtures / "patches.dng", options, custom, p, error),
+                        who + ": custom white balance on a DNG: " + error);
+                // As Shot -> custom with As Shot's own numbers is the same picture.
+                for (int i = 0; i < 6; ++i)
+                    for (int c = 0; c < 3; ++c) {
+                        const double a = patch_mean(as_shot, i, c), b = patch_mean(custom, i, c);
+                        require(std::abs(a - b) < 2e-3 + 2e-3 * std::abs(a),
+                                who + ": custom at the As Shot numbers moved " + kPatches[i].name + ": " +
+                                    std::to_string(a) + " -> " + std::to_string(b));
+                    }
+                // Telling the decoder the light was tungsten makes a daylight grey blue.
+                options.temperature_k = 3200;
+                options.tint = 0;
+                FloatImage tungsten;
+                require(decode_linear_prophoto(fixtures / "patches.dng", options, tungsten, p, error),
+                        who + ": 3200 K on a DNG: " + error);
+                const double before = patch_mean(as_shot, grey, 2) / patch_mean(as_shot, grey, 0);
+                const double after = patch_mean(tungsten, grey, 2) / patch_mean(tungsten, grey, 0);
+                require(after > before * 1.5, who + ": 3200 K did not cool the grey patch: blue/red " +
+                                                  std::to_string(before) + " -> " + std::to_string(after));
+                // The neutral picker reads the light back from a grey patch.
+                require(as_shot.raw_metadata.has_value(), who + ": no RAW metadata");
+                double picked_k = 0, picked_tint = 0;
+                const std::array<double, 3> sample{patch_mean(as_shot, grey, 0), patch_mean(as_shot, grey, 1), patch_mean(as_shot, grey, 2)};
+                require(neutral_temperature_tint(*as_shot.raw_metadata, sample, picked_k, picked_tint, error),
+                        who + ": neutral pick on a DNG: " + error);
+                require(std::abs(picked_k - shot_k) < 60 && std::abs(picked_tint - shot_tint) < 3,
+                        who + ": the neutral picker read " + std::to_string(picked_k) + " K, tint " +
+                            std::to_string(picked_tint) + " from a grey lit by " + std::to_string(shot_k) + " K");
+            }
+        }
+
+        std::cout << "host RAW boundary: PhotoCraft and LibRaw behind one rule; float TIFF exact; raw-to-tiff verified; "
+                     "DNG white balance on both\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "spk_host_raw_photocraft: " << e.what() << '\n';

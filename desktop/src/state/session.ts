@@ -953,6 +953,10 @@ export function hostRedecodes(methods: readonly string[] | undefined): boolean {
 let decodeTimer: ReturnType<typeof setTimeout> | null = null;
 /** The wire decode the engine session was last decoded with. */
 let sentDecode: string | null = null;
+/** The decode settings behind `sentDecode`: what the picture on screen was really decoded with. */
+let appliedDecode: DecodeSettings | null = null;
+/** The camera's own decode: what a host that refuses a setting leaves the frame at. */
+const cameraDecode = (d: DecodeSettings): DecodeSettings => ({ ...d, whiteBalance: 'As Shot', lensCorrection: false });
 const REDECODE_DELAY_MS = 350;
 
 function scheduleRedecode() {
@@ -971,7 +975,8 @@ async function redecodeNow() {
   const s = get();
   const sid = s.engineSession;
   if (!sid || !s.selection) { resumePreviewsWhenIdle(); return; }
-  const wire = decodeWire(s.sidecar.decode, isRawFrame());
+  const attempted = s.sidecar.decode;
+  const wire = decodeWire(attempted, isRawFrame());
   const key = JSON.stringify(wire);
   if (!wire || key === sentDecode || !hostRedecodes(s.hello?.methods)) {
     void requestPrint();
@@ -983,11 +988,22 @@ async function redecodeNow() {
     const r = await host().redecode(sid, wire);
     if (get().engineSession !== sid) return;
     sentDecode = key;
+    appliedDecode = attempted;
+    platform().log('info', `session: redecode ${JSON.stringify({ decode: wire, raw_decoder: r.raw_decoder ?? null })}`);
     set({ nativeSize: { width: r.width, height: r.height }, metadata: r.metadata ?? get().metadata, status: '' });
     lastOriginalKey = null;
     void requestPrint();
   } catch (e) {
     noteError(tz('White balance', '白平衡'), e);
+    // The host keeps the old session when it refuses a setting this file
+    // cannot have (no calibration, no lens profile). The edit must not keep
+    // claiming it: the sliders would show a picture that does not exist, and
+    // an export, which decodes with the saved edit, would fail on it.
+    if ((e as { code?: unknown } | null)?.code === 'unsupported' && get().engineSession === sid
+      && jsonEqual(get().sidecar.decode, attempted)) {
+      set({ sidecar: { ...get().sidecar, decode: appliedDecode ?? cameraDecode(attempted) } });
+      scheduleSave();
+    }
   } finally {
     set({ redecoding: false });
     void refreshOriginal();
@@ -1745,6 +1761,7 @@ async function closeEngineSession() {
   neutralPickGeneration++;
   neutralPreviousOriginal = null;
   sentDecode = null;
+  appliedDecode = null;
   wantedGen++;
   if (fullTimer) clearTimeout(fullTimer);
   if (decodeTimer) clearTimeout(decodeTimer);
@@ -2030,9 +2047,11 @@ async function develop(path: string, gen: number) {
     }
     const params = get().sidecar.params;
     const openingPair = get().pair ? pairSnapshotFor(get().pair!, params) : null;
-    const decode = decodeWire(get().sidecar.decode, isRawPath(path));
+    const decodeSettings = get().sidecar.decode;
+    const decode = decodeWire(decodeSettings, isRawPath(path));
     const openStarted = performance.now();
     let r;
+    let refused = false;
     try {
       if (openingPair) {
         if (!get().hello?.methods?.includes('open_pair')) throw new Error(tz('This engine does not support half-frame pairs.', '此引擎不支持半格拼接。'));
@@ -2042,6 +2061,7 @@ async function develop(path: string, gen: number) {
       // A host without R2 refuses the decode key: open with the camera's own.
       if (!(decode && e instanceof HostCallError && e.code === 'unsupported')) throw e;
       r = await host().open(path, wireParams(params));
+      refused = true;
     }
     if (gen !== openGen) {
       await host().close(r.session).catch(() => {});
@@ -2050,7 +2070,9 @@ async function develop(path: string, gen: number) {
     sentParams = params;
     sentPair = openingPair ? JSON.stringify(pairWithMeterReadings(openingPair, openingPair, r.pair_info, params.autoExposureMethod)) : null;
     if (openingPair) adoptPairMeterReadings(openingPair, r.pair_info, params.autoExposureMethod);
-    sentDecode = JSON.stringify(decode);
+    // A refused decode opened the camera's own: remember that, not the request.
+    appliedDecode = refused ? cameraDecode(decodeSettings) : decodeSettings;
+    sentDecode = JSON.stringify(refused ? decodeWire(appliedDecode, isRawPath(path)) : decode);
     set({ engineSession: r.session, nativeSize: { width: r.width, height: r.height }, metadata: r.metadata, pairInfo: r.pair_info ?? null, frameKind: r.kind ?? (isRawPath(path) ? 'raw' : null) });
     if (openingPair) notePairExposure(get());
     if (openTrace?.generation === gen) {
@@ -2066,6 +2088,7 @@ async function develop(path: string, gen: number) {
         queue_transport_ms: r.timings_ms?.decode !== undefined && r.timings_ms?.open !== undefined
           ? Math.max(0, Math.round((elapsed(openStarted) - r.timings_ms.decode - r.timings_ms.open) * 10) / 10) : null,
         original_thumbnail_ms: openTrace?.originalMs ?? null,
+        raw_decoder: r.raw_decoder ?? null,
         core: get().hello?.capabilities?.backend?.render_core })}`,
     );
     recomputeFilmFormat();

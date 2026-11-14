@@ -151,6 +151,8 @@ struct Session {
     uint32_t width = 0, height = 0;
     Metadata metadata;
     std::optional<spk::io::RawMetadata> raw_metadata;
+    // Which rule chose the RAW decoder (raw_backend.hpp); empty for a raster.
+    std::string raw_backend_reason;
     std::string output_space = "ProPhoto RGB";
     DecodeOptions decode;
     std::unique_ptr<PairSource> pair_source;
@@ -639,6 +641,13 @@ spk_session* engine_open(const FloatImage& frame, const std::string& delta, Json
     return handle;
 }
 
+// ", raw photocraft (SPEKTRALAB_RAW_BACKEND)" for a RAW session, nothing for
+// a raster: the log is where a tester reads which decoder really ran.
+std::string raw_backend_note(const Session& s) {
+    if (!s.raw_metadata) return {};
+    return ", raw " + s.raw_metadata->backend + " (" + s.raw_backend_reason + ")";
+}
+
 Json open_reply(const Session& s, const Decoded& d, const Json& opened, double open_ms) {
     Json r = Json::object();
     r.set("session", str(s.id));
@@ -662,12 +671,13 @@ Json open_reply(const Session& s, const Decoded& d, const Json& opened, double o
         timings.set("raw", std::move(raw));
     }
     r.set("timings_ms", std::move(timings));
-    if (d.frame.raw_metadata) {
+    // The session's copy: the decoded frame's metadata was moved into it.
+    if (s.raw_metadata) {
         // Which RAW decoder made this frame, and why (raw_backend.hpp).
-        const auto& m = *d.frame.raw_metadata;
+        const auto& m = *s.raw_metadata;
         Json raw = Json::object();
         raw.set("backend", str(m.backend));
-        raw.set("reason", str(d.frame.raw_backend_reason));
+        raw.set("reason", str(s.raw_backend_reason));
         raw.set("decoder", str(m.decoder_name));
         if (!m.libraw_decoder_name.empty()) raw.set("libraw_decoder", str(m.libraw_decoder_name));
         if (m.photocraft) {
@@ -703,6 +713,7 @@ Json m_open(const Request& q) {
     s->height = d.frame.height;
     s->metadata = d.probe.metadata;
     s->raw_metadata = std::move(d.frame.raw_metadata);
+    s->raw_backend_reason = d.frame.raw_backend_reason;
     s->decode = options;
     s->output_space = output_space_of(opened.at("params"));
     {
@@ -712,7 +723,7 @@ Json m_open(const Request& q) {
     }
     log_line(1, "open " + s->id + " " + s->path + " " + std::to_string(d.frame.width) + "x" +
                     std::to_string(d.frame.height) + " decode " + std::to_string(int(d.decode_ms)) + " ms, open " +
-                    std::to_string(int(open_ms)) + " ms");
+                    std::to_string(int(open_ms)) + " ms" + raw_backend_note(*s));
     return open_reply(*s, d, opened, open_ms);
 }
 
@@ -827,8 +838,12 @@ Json m_redecode(const Request& q) {
     s->height = d.frame.height;
     s->metadata = d.probe.metadata;
     s->raw_metadata = std::move(d.frame.raw_metadata);
+    s->raw_backend_reason = d.frame.raw_backend_reason;
     s->decode = options;
     s->output_space = output_space_of(opened.at("params"));
+    log_line(1, "redecode " + s->id + " " + s->path + " " + std::to_string(d.frame.width) + "x" +
+                    std::to_string(d.frame.height) + " decode " + std::to_string(int(d.decode_ms)) + " ms" +
+                    raw_backend_note(*s));
     return open_reply(*s, d, opened, open_ms);
 }
 
@@ -1473,6 +1488,15 @@ Json m_export_frame(const Request& q, std::vector<uint8_t>* proof_payload = null
         r.set("encoding", str("cineon")); r.set("primaries", str("ProPhoto RGB"));
         r.set("color_space", str("untagged Cineon")); r.set("view_luts", std::move(lut_paths));
     }
+    if (s->raw_metadata) {
+        // The decoder behind the exported pixels, for the record of a comparison.
+        Json raw = Json::object();
+        raw.set("backend", str(s->raw_metadata->backend));
+        raw.set("reason", str(s->raw_backend_reason));
+        r.set("raw_decoder", std::move(raw));
+    }
+    log_line(1, "export " + s->id + (private_session ? " (private source) " : " ") + path_utf8(path.filename()) + " " +
+                    std::to_string(v.width) + "x" + std::to_string(v.height) + raw_backend_note(*s));
     progress_event(*s, progress, 1, "done");
     return r;
 }
